@@ -296,7 +296,7 @@ function seed(){
   };
 }
 const DEFAULT_RULES={ d1Min:250000, d2Min:2000, freeMin:50000, eventStart:'2026-09-01', eventEnd:'2026-09-10', categoryHotels:{ D1:['h1','h2'], D2:['h3'], D3:['h4'] }, guestTypeHotels:{ PR:['h1'], Media:['h1'], Volunteer:['h4'] } };
-function defaultDB(){ return { hotels:[], bookings:[], notifications:[], rules:JSON.parse(JSON.stringify(DEFAULT_RULES)), assign:{}, loginList:[] }; }
+function defaultDB(){ return { hotels:[], bookings:[], notifications:[], rules:JSON.parse(JSON.stringify(DEFAULT_RULES)), assign:{}, loginList:[], creds:{} }; }
 let DB = defaultDB();
 let _saveTimer=null;
 function save(){ if(!USER) return; clearTimeout(_saveTimer); _saveTimer=setTimeout(()=>{ syncToCloud().catch(e=>console.warn('sync',e)); }, 400); }
@@ -322,7 +322,8 @@ async function loadFromCloud(){
   if(role==='admin'||role==='brahmachari'){ const amtR=await sb.from('amounts').select('booking_id,amount'); (amtR.data||[]).forEach(a=>amap[a.booking_id]=Number(a.amount)); }
   if(Array.isArray(bookingsR.data)) DB.bookings=bookingsR.data.map(r=>{ const b=Object.assign({},r.data); b.id=r.id; b.devId=r.dev_id||''; const d=dmap[r.id]; if(d){ b.receipt=d.receipt||''; b.donationVerified=!!d.donation_verified; b.receiptWrong=!!d.receipt_wrong; } b.donation = (amap[r.id]!=null) ? amap[r.id] : catFloor(b.donationCategory); return b; });
   if(Array.isArray(notifsR.data)) DB.notifications=notifsR.data.map(n=>Object.assign({},n.data,{id:n.id,ack:!!n.ack,ts:n.ts?Date.parse(n.ts):Date.now()}));
-  if(role==='admin'){ const pr=await sb.from('profiles').select('login_id,role,assigned_name'); if(Array.isArray(pr.data)){ DB.assign={}; DB.loginList=[]; pr.data.forEach(p=>{ DB.loginList.push(p); DB.assign[p.login_id]=p.assigned_name||''; }); } }
+  if(role==='admin'){ const pr=await sb.from('profiles').select('login_id,role,assigned_name'); if(Array.isArray(pr.data)){ DB.assign={}; DB.loginList=[]; pr.data.forEach(p=>{ DB.loginList.push(p); DB.assign[p.login_id]=p.assigned_name||''; }); }
+    const cr=await sb.from('credentials').select('login_id,pw'); if(Array.isArray(cr.data)){ DB.creds={}; cr.data.forEach(c=>DB.creds[c.login_id]=c.pw); } }
   syncHotelMinFromRules();
 }
 async function syncToCloud(){
@@ -1558,22 +1559,30 @@ function setAssign(id,val){ DB.assign=DB.assign||{}; DB.assign[id]=val.trim(); s
 function filterLoginRows(q){ q=(q||'').toLowerCase().trim();
   document.querySelectorAll('#loginRows tr').forEach(tr=>{ const s=tr.dataset.s||''; tr.style.display=s.includes(q)?'':'none'; }); }
 function loginRoleLabel(r){ return r==='admin'?'Super Admin':r==='vcm'?'Admin (VCM)':r==='staff'?'Staff':'Devotee'; }
+/* Copy the full login (ID + password + person's name) as text so it can be shared on WhatsApp */
+function copyLogin(id){
+  const pw=(DB.creds&&DB.creds[id])||''; const name=(DB.assign&&DB.assign[id])||'';
+  const txt='Sri Vrindavan — Booking Portal\nhttps://srivrindavan.com\n\nLogin ID: '+id+'\nPassword: '+pw+(name?('\nName: '+name):'');
+  if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(txt).then(()=>toast('✅ Login copied — paste it to share'),()=>fallbackCopy(txt)); } else fallbackCopy(txt);
+}
 function viewLogins(){
-  DB.assign=DB.assign||{};
+  DB.assign=DB.assign||{}; DB.creds=DB.creds||{};
   const order={admin:0,vcm:1,staff:2,brahmachari:3};
   const list=[...(DB.loginList||[])].sort((a,b)=> (order[a.role]-order[b.role]) || a.login_id.localeCompare(b.login_id));
-  const rows=list.map(u=>{ const to=DB.assign[u.login_id]||''; const rl=loginRoleLabel(u.role);
+  const rows=list.map(u=>{ const to=DB.assign[u.login_id]||''; const pw=DB.creds[u.login_id]||''; const rl=loginRoleLabel(u.role);
     return `<tr data-s="${esc((u.login_id+' '+rl+' '+to).toLowerCase())}">
-      <td><span class="rcp-copy" onclick="copyStr('${u.login_id}','ID')" title="Click to copy">${u.login_id}</span></td>
-      <td>${rl}</td>
-      <td><input type="text" value="${esc(to)}" placeholder="type person's name" style="min-width:170px" onchange="setAssign('${u.login_id}',this.value)"></td>
+      <td data-label="Login ID"><span class="rcp-copy" onclick="copyLogin('${u.login_id}')" title="Click to copy this login">${u.login_id}</span></td>
+      <td data-label="Password"><span class="rcp-copy" onclick="copyLogin('${u.login_id}')" title="Click to copy this login">${esc(pw||'••••')}</span></td>
+      <td data-label="Role">${rl}</td>
+      <td data-label="Assigned to"><input type="text" value="${esc(to)}" placeholder="type person's name" style="min-width:150px" onchange="setAssign('${u.login_id}',this.value)"></td>
+      <td data-label="Share"><button class="btn sm" onclick="copyLogin('${u.login_id}')">📋 Copy</button></td>
     </tr>`; }).join('');
   const counts=['admin','vcm','staff','brahmachari'].map(r=>loginRoleLabel(r)+': '+list.filter(u=>u.role===r).length).join(' · ');
   return `<div class="card"><h2 class="section">🔑 Logins</h2>
-    <p class="subhead">All ${list.length} login accounts. Passwords are stored securely (hashed) and can't be shown here — share them from your CSV/PDF. Type each person's name in <b>Assigned to</b>; that name shows when they log in and is recorded on every booking they make. ${counts}.</p>
+    <p class="subhead">All ${list.length} login accounts. Passwords are visible only to you (Super Admin) — no other role can see them. Tap <b>Copy</b> (or a row's ID/password) to copy the <b>Login ID + Password + Name</b> together, ready to paste into WhatsApp. ${counts}.</p>
     <input placeholder="🔍 Search ID, role, or assigned name" value="${esc(searchQ['loginRows']||'')}" oninput="setSearch('loginRows',this.value)" style="max-width:360px;margin-bottom:10px">
     <div style="overflow:auto">
-    <table><thead><tr><th>Login ID</th><th>Role</th><th>Assigned to (person's name)</th></tr></thead>
+    <table class="stack-mobile"><thead><tr><th>Login ID</th><th>Password</th><th>Role</th><th>Assigned to (person's name)</th><th>Share</th></tr></thead>
       <tbody id="loginRows">${rows}</tbody></table></div></div>`;
 }
 
