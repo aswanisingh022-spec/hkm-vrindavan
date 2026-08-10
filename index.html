@@ -134,9 +134,9 @@
     <label>Password</label>
     <input id="loginPass" type="password" placeholder="••••••••" autocomplete="off">
     <p id="loginHint" style="text-align:center;margin:10px 0 0;font-size:12px;color:var(--saffron-dark)"></p>
-    <button class="btn" style="width:100%;margin-top:14px" onclick="doLogin()">Enter Portal</button>
+    <button id="loginBtn" class="btn" style="width:100%;margin-top:14px" onclick="doLogin()">Enter Portal</button>
     <p class="muted" style="text-align:center;margin:12px 0 0;font-size:11.5px">
-      Your data is saved on this device and stays after you close the browser.</p>
+      Your bookings are saved securely in the cloud and shared live across all devices.</p>
   </div>
 </div>
 
@@ -158,9 +158,13 @@
 <div id="toast" class="toast"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
-/* ---------------- Data layer (localStorage) ---------------- */
+/* ---------------- Data layer (Supabase cloud) ---------------- */
 const DB_KEY = 'hkm_portal_v30';
+const SB_URL="https://qhfbfatubtofjapdzvdv.supabase.co";
+const SB_KEY="sb_publishable_tQBD7n-LXWOP3M2cGlyw6Q_gTbM6nV4";
+const sb = window.supabase.createClient(SB_URL, SB_KEY);
 function seed(){
   const extra=[];
   const FN=['Amit','Priya','Rahul','Sneha','Vikram','Anjali','Rohan','Kavita','Sanjay','Meera','Arjun','Pooja','Karan','Divya','Suresh','Neha','Manish','Ritu','Deepak','Anita','Gaurav','Shreya','Nikhil','Preeti','Ajay','Swati','Vivek','Lakshmi','Harish','Nisha'];
@@ -278,9 +282,50 @@ function seed(){
   };
 }
 const DEFAULT_RULES={ d1Min:250000, d2Min:2000, freeMin:50000, eventStart:'2026-09-01', eventEnd:'2026-09-10', categoryHotels:{ D1:['h1','h2'], D2:['h3'], D3:['h4'] }, guestTypeHotels:{ PR:['h1'], Media:['h1'], Volunteer:['h4'] } };
-function load(){ try{return JSON.parse(localStorage.getItem(DB_KEY))||seed()}catch(e){return seed()} }
-function save(){ try{ localStorage.setItem(DB_KEY, JSON.stringify(DB)); }catch(e){} }
-let DB = load();
+function defaultDB(){ return { hotels:[], bookings:[], notifications:[], rules:JSON.parse(JSON.stringify(DEFAULT_RULES)), assign:{}, loginList:[] }; }
+let DB = defaultDB();
+let _saveTimer=null;
+function save(){ if(!USER) return; clearTimeout(_saveTimer); _saveTimer=setTimeout(()=>{ syncToCloud().catch(e=>console.warn('sync',e)); }, 400); }
+/* ---- Supabase data layer ---- */
+function catFloor(cat){ const r=DB.rules; return cat==='D1'?(r.d1Min||0):cat==='D2'?(r.d2Min||0):0; }
+function computeCat(amt){ const r=DB.rules, d=Number(amt)||0; return d>=r.d1Min?'D1':(d>=r.d2Min?'D2':'D3'); }
+function bookingData(b){ const d=Object.assign({},b); delete d.donation; delete d.receipt; delete d.donationVerified; delete d.receiptWrong; delete d.devId; d.donationCategory=computeCat(b.donation); return d; }
+async function loadFromCloud(){
+  const role=USER.role;
+  const [hotelsR, rulesR, bookingsR, donationsR, notifsR] = await Promise.all([
+    sb.from('hotels').select('data'),
+    sb.from('rules').select('data').eq('id',1).maybeSingle(),
+    sb.from('bookings').select('id,data,dev_id'),
+    sb.from('donations').select('booking_id,receipt,donation_verified,receipt_wrong'),
+    (role==='admin'||role==='vcm') ? sb.from('notifications').select('id,data,ack,ts').order('ts',{ascending:false}).limit(300) : Promise.resolve({data:[]})
+  ]);
+  DB.hotels=(hotelsR.data||[]).map(r=>r.data).sort((a,b)=>(a.priority||99)-(b.priority||99));
+  DB.rules=Object.assign(JSON.parse(JSON.stringify(DEFAULT_RULES)),(rulesR.data&&rulesR.data.data)||{});
+  const dmap={}; (donationsR.data||[]).forEach(d=>dmap[d.booking_id]=d);
+  let amap={};
+  if(role==='admin'||role==='brahmachari'){ const amtR=await sb.from('amounts').select('booking_id,amount'); (amtR.data||[]).forEach(a=>amap[a.booking_id]=Number(a.amount)); }
+  DB.bookings=(bookingsR.data||[]).map(r=>{ const b=Object.assign({},r.data); b.id=r.id; b.devId=r.dev_id||''; const d=dmap[r.id]; if(d){ b.receipt=d.receipt||''; b.donationVerified=!!d.donation_verified; b.receiptWrong=!!d.receipt_wrong; } b.donation = (amap[r.id]!=null) ? amap[r.id] : catFloor(b.donationCategory); return b; });
+  DB.notifications=(notifsR.data||[]).map(n=>Object.assign({},n.data,{id:n.id,ack:!!n.ack,ts:n.ts?Date.parse(n.ts):Date.now()}));
+  DB.assign={}; DB.loginList=[];
+  if(role==='admin'){ const pr=await sb.from('profiles').select('login_id,role,assigned_name'); (pr.data||[]).forEach(p=>{ DB.loginList.push(p); DB.assign[p.login_id]=p.assigned_name||''; }); }
+  syncHotelMinFromRules();
+}
+async function syncToCloud(){
+  if(!USER) return; const role=USER.role, mylogin=USER.id;
+  if(role==='staff') return;
+  const mine=DB.bookings.filter(b=> (role==='admin'||role==='vcm') ? true : b.devId===mylogin);
+  if(mine.length){
+    await sb.from('bookings').upsert(mine.map(b=>({id:b.id,dev_id:b.devId||null,data:bookingData(b)})));
+    await sb.from('donations').upsert(mine.map(b=>({booking_id:b.id,receipt:b.receipt||'',donation_verified:!!b.donationVerified,receipt_wrong:!!b.receiptWrong})));
+    if(role!=='vcm'){ await sb.from('amounts').upsert(mine.map(b=>({booking_id:b.id,amount:Number(b.donation)||0}))); }
+  }
+  if(role==='admin') await sb.from('rules').upsert({id:1,data:DB.rules});
+  if((role==='admin'||role==='vcm') && DB.hotels.length) await sb.from('hotels').upsert(DB.hotels.map(h=>({id:h.id,data:h})));
+  if((role==='admin'||role==='vcm') && DB.notifications.length) await sb.from('notifications').upsert(DB.notifications.slice(0,300).map(n=>({id:n.id,data:n,ack:!!n.ack,ts:new Date(n.ts||Date.now()).toISOString()}))).then(()=>{},()=>{});
+}
+let _pollTimer=null;
+function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) return; const ae=document.activeElement; if(ae&&/INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return; try{ await loadFromCloud(); render(); if(USER.role==='admin'||USER.role==='vcm') updateNotifBadge(); }catch(e){} }, 15000); }
+function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 if(!DB.notifications) DB.notifications=[];
 if(!DB.assign) DB.assign={};   // login ID -> person the credential was given to
 if(!DB.rules) DB.rules=JSON.parse(JSON.stringify(DEFAULT_RULES));
@@ -297,7 +342,7 @@ function isSuper(){ return USER && USER.role==='admin'; }          // Super Admi
 function isVcm(){ return USER && USER.role==='vcm'; }              // VCM Guest House mini-admin
 function seeMoney(){ return isSuper(); }                            // only Super Admin sees rupee amounts / receipts
 /* donation category from the current rules */
-function guestCategory(b){ const d=b.donation||0, r=DB.rules; return d>=r.d1Min?'D1':(d>=r.d2Min?'D2':'D3'); }
+function guestCategory(b){ if(!seeMoney() && b.donationCategory) return b.donationCategory; const d=b.donation||0, r=DB.rules; return d>=r.d1Min?'D1':(d>=r.d2Min?'D2':'D3'); }
 function catColor(c){ return c==='D1'?'p-confirmed':c==='D2'?'p-waitlist':'p-pending'; }
 function catBadge(b){ const c=guestCategory(b); return `<span class="pill ${catColor(c)}">${c}</span>`; }
 /* what to show for a donation: Super Admin sees the amount, VCM sees only the category */
@@ -305,7 +350,7 @@ function donDisplay(b){ return seeMoney()? money(b.donation) : catBadge(b); }
 /* receipt sub-line: Super Admin sees the receipt number; VCM sees only verified/unverified (no number, no amount) */
 function donSub(b){ if(seeMoney()) return b.donationVerified?'✅ receipt verified':(b.receipt?'📎 '+esc(b.receipt)+' (unverified)':'⚠️ no receipt');
   return b.donationVerified?'✅ receipt verified':'⚠ receipt unverified'; }
-function notify(kind,msg,brahmachari,bookingId){ DB.notifications.unshift({id:uid('n'),ts:Date.now(),kind,msg,brahmachari:brahmachari||'',bookingId:bookingId||'',ack:false}); save(); }
+function notify(kind,msg,brahmachari,bookingId){ const n={id:uid('n'),ts:Date.now(),kind,msg,brahmachari:brahmachari||'',bookingId:bookingId||'',ack:false}; DB.notifications.unshift(n); if(USER){ sb.from('notifications').insert({id:n.id,data:n,ack:false,ts:new Date(n.ts).toISOString()}).then(()=>{},()=>{}); } save(); }
 
 /* ---------------- Helpers ---------------- */
 const $ = s => document.querySelector(s);
@@ -446,103 +491,36 @@ function applySuggestion(id,which){ const b=DB.bookings.find(x=>x.id===id); if(!
   toast('Applied '+s.label+': '+s.hotel.name+' · '+s.roomType+' × '+s.rooms+(s.extra>0?' + '+s.extra+' extra bed':'')); }
 
 /* ---------------- Auth ---------------- */
-const USERS=[
-  {id:'DEV1303',pass:'zj3bue',role:'brahmachari',name:""},
-  {id:'DEV1991',pass:'2qu5a7',role:'brahmachari',name:""},
-  {id:'DEV8376',pass:'krpk3p',role:'brahmachari',name:""},
-  {id:'DEV7102',pass:'upf7pu',role:'brahmachari',name:""},
-  {id:'DEV7700',pass:'asmm73',role:'brahmachari',name:""},
-  {id:'DEV3903',pass:'52ax5c',role:'brahmachari',name:""},
-  {id:'DEV2720',pass:'8x6usw',role:'brahmachari',name:""},
-  {id:'DEV5959',pass:'qtihyb',role:'brahmachari',name:""},
-  {id:'DEV9429',pass:'dew93g',role:'brahmachari',name:""},
-  {id:'DEV1685',pass:'mm2tzu',role:'brahmachari',name:""},
-  {id:'DEV9744',pass:'s3nxa7',role:'brahmachari',name:""},
-  {id:'DEV9679',pass:'xai4r3',role:'brahmachari',name:""},
-  {id:'DEV6712',pass:'r5z52q',role:'brahmachari',name:""},
-  {id:'DEV6257',pass:'j28zhm',role:'brahmachari',name:""},
-  {id:'DEV7849',pass:'tjrtgd',role:'brahmachari',name:""},
-  {id:'DEV9460',pass:'3mzj3a',role:'brahmachari',name:""},
-  {id:'DEV4464',pass:'6i8qzx',role:'brahmachari',name:""},
-  {id:'DEV9719',pass:'hgiipr',role:'brahmachari',name:""},
-  {id:'DEV4900',pass:'xih5pe',role:'brahmachari',name:""},
-  {id:'DEV3209',pass:'ej96q8',role:'brahmachari',name:""},
-  {id:'DEV2286',pass:'fjyk5q',role:'brahmachari',name:""},
-  {id:'DEV1883',pass:'g5wbf9',role:'brahmachari',name:""},
-  {id:'DEV8783',pass:'i6a8ve',role:'brahmachari',name:""},
-  {id:'DEV9830',pass:'xcvka9',role:'brahmachari',name:""},
-  {id:'DEV4567',pass:'kdjhtw',role:'brahmachari',name:""},
-  {id:'DEV5090',pass:'up3teg',role:'brahmachari',name:""},
-  {id:'DEV8625',pass:'uxdqty',role:'brahmachari',name:""},
-  {id:'DEV2475',pass:'mtittb',role:'brahmachari',name:""},
-  {id:'DEV1108',pass:'pgd9pv',role:'brahmachari',name:""},
-  {id:'DEV5294',pass:'c3wdin',role:'brahmachari',name:""},
-  {id:'DEV2829',pass:'48avgt',role:'brahmachari',name:""},
-  {id:'DEV5798',pass:'bdnrzg',role:'brahmachari',name:""},
-  {id:'DEV5089',pass:'prbaph',role:'brahmachari',name:""},
-  {id:'DEV7444',pass:'3eeqwf',role:'brahmachari',name:""},
-  {id:'DEV8706',pass:'vq36di',role:'brahmachari',name:""},
-  {id:'DEV6679',pass:'e7cd53',role:'brahmachari',name:""},
-  {id:'DEV2141',pass:'j6vd95',role:'brahmachari',name:""},
-  {id:'DEV2291',pass:'fhf99q',role:'brahmachari',name:""},
-  {id:'DEV8970',pass:'jy24j6',role:'brahmachari',name:""},
-  {id:'DEV3822',pass:'mhc2bs',role:'brahmachari',name:""},
-  {id:'DEV3749',pass:'7x6wfv',role:'brahmachari',name:""},
-  {id:'DEV9716',pass:'ybmgtw',role:'brahmachari',name:""},
-  {id:'DEV3867',pass:'837iig',role:'brahmachari',name:""},
-  {id:'DEV8025',pass:'tapyt3',role:'brahmachari',name:""},
-  {id:'DEV7857',pass:'e46tq5',role:'brahmachari',name:""},
-  {id:'DEV2099',pass:'jf96i2',role:'brahmachari',name:""},
-  {id:'DEV9691',pass:'ckdu4r',role:'brahmachari',name:""},
-  {id:'DEV6849',pass:'kwpg24',role:'brahmachari',name:""},
-  {id:'DEV9395',pass:'9gy8ve',role:'brahmachari',name:""},
-  {id:'DEV5634',pass:'hy2wks',role:'brahmachari',name:""},
-  {id:'SADM01',pass:'4wt2a8',role:'admin',name:""},
-  {id:'SADM02',pass:'qsbi7f',role:'admin',name:""},
-  {id:'SADM03',pass:'z2t6wr',role:'admin',name:""},
-  {id:'SADM04',pass:'5xia35',role:'admin',name:""},
-  {id:'SADM05',pass:'p9axvs',role:'admin',name:""},
-  {id:'VCM01',pass:'i6k7tm',role:'vcm',name:""},
-  {id:'VCM02',pass:'97v29i',role:'vcm',name:""},
-  {id:'VCM03',pass:'tj2z6y',role:'vcm',name:""},
-  {id:'VCM04',pass:'jdtraq',role:'vcm',name:""},
-  {id:'VCM05',pass:'j7e8p4',role:'vcm',name:""},
-  {id:'STAFF01',pass:'g2rhqd',role:'staff',name:""},
-  {id:'STAFF02',pass:'tvbssr',role:'staff',name:""},
-  {id:'STAFF03',pass:'hqbth4',role:'staff',name:""},
-  {id:'STAFF04',pass:'nqdq25',role:'staff',name:""},
-  {id:'STAFF05',pass:'yb6u7q',role:'staff',name:""},
-  {id:'STAFF06',pass:'4h82ge',role:'staff',name:""},
-  {id:'STAFF07',pass:'8gqpu5',role:'staff',name:""},
-  {id:'STAFF08',pass:'ds837f',role:'staff',name:""},
-  {id:'STAFF09',pass:'9speqc',role:'staff',name:""},
-  {id:'STAFF10',pass:'waymr9',role:'staff',name:""}
-];
-function findUser(id,pass){ const k=(id||'').trim().toUpperCase(); const p=(pass||'').trim();
-  return USERS.find(u=>u.id.toUpperCase()===k && u.pass===p) || null; }
-/* Name shown when a user logs in = whoever the Super Admin assigned this ID to (falls back to ID). */
-function userDisplayName(u){ const a=(DB.assign&&DB.assign[u.id])?DB.assign[u.id].trim():''; return a || u.name || u.id; }
 function roleLabel(r){ return r==='admin'?'Super Admin':r==='vcm'?'VCM Guest House':r==='staff'?'Staff':'Devotee'; }
 function saveLastLogin(){ try{ localStorage.setItem('hkm_lastLogin', JSON.stringify({id:USER.id,name:USER.name,role:USER.role,ts:Date.now()})); }catch(e){} }
 function getLastLogin(){ try{ return JSON.parse(localStorage.getItem('hkm_lastLogin')); }catch(e){ return null; } }
 function initLoginPrefill(){ const last=getLastLogin(); if(!last) return;
   const idEl=$('#loginId'); if(idEl) idEl.value=last.id||'';
   const hint=$('#loginHint'); if(hint) hint.innerHTML='↩ Welcome back, <b>'+esc(last.name||'')+'</b> · last logged in as '+roleLabel(last.role)+' ('+esc(last.id||'')+')'; }
-function doLogin(){
+async function doLogin(){
   const id=$('#loginId').value.trim(); const pass=$('#loginPass').value;
   if(!id){ toast('Enter your Login ID'); return; }
   if(!pass){ toast('Enter your password'); return; }
-  const u=findUser(id,pass);
-  if(!u){ toast('Invalid Login ID or password'); return; }
-  const disp=userDisplayName(u);
-  USER={id:u.id,name:disp,role:u.role}; saveLastLogin();
-  $('#loginView').classList.add('hidden');
-  $('#appView').classList.remove('hidden');
-  $('#whoName').textContent=disp;
-  $('#whoRole').textContent=(u.role==='admin'?'Super Admin':u.role==='vcm'?'VCM Guest House':u.role==='staff'?'Staff (view only)':'Devotee')+' · '+u.id;
-  buildTabs();
+  const btn=$('#loginBtn'); if(btn){ btn.disabled=true; btn.textContent='Signing in…'; }
+  try{
+    const email=id.toLowerCase()+'@hkm.local';
+    const { data, error } = await sb.auth.signInWithPassword({ email, password:pass });
+    if(error||!data.user){ toast('Invalid Login ID or password'); return; }
+    const { data:prof } = await sb.from('profiles').select('login_id,role,assigned_name').eq('id',data.user.id).maybeSingle();
+    if(!prof){ toast('No profile found for this login'); return; }
+    USER={ id:prof.login_id, role:prof.role, name:(prof.assigned_name&&prof.assigned_name.trim())||prof.login_id };
+    saveLastLogin();
+    await loadFromCloud();
+    $('#loginView').classList.add('hidden');
+    $('#appView').classList.remove('hidden');
+    $('#whoName').textContent=USER.name;
+    $('#whoRole').textContent=(USER.role==='admin'?'Super Admin':USER.role==='vcm'?'VCM Guest House':USER.role==='staff'?'Staff (view only)':'Devotee')+' · '+USER.id;
+    buildTabs();
+    startPoll();
+  }catch(e){ toast('Login failed — check your connection'); console.warn(e); }
+  finally{ if(btn){ btn.disabled=false; btn.textContent='Enter Portal'; } }
 }
-function logout(){ USER=null; $('#appView').classList.add('hidden'); $('#loginView').classList.remove('hidden'); const p=$('#loginPass'); if(p)p.value=''; }
+async function logout(){ try{ await sb.auth.signOut(); }catch(e){} USER=null; stopPoll(); $('#appView').classList.add('hidden'); $('#loginView').classList.remove('hidden'); const p=$('#loginPass'); if(p)p.value=''; }
 
 /* ---------------- Navigation ---------------- */
 let currentTab='';
@@ -1508,27 +1486,26 @@ function viewDonations(){
 
 /* ---------------- Super Admin: Logins (all IDs & passwords) ---------------- */
 function copyStr(s,msg){ if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(s).then(()=>toast((msg||'Copied')+': '+s),()=>fallbackCopy(s)); } else fallbackCopy(s); }
-function setAssign(id,val){ DB.assign=DB.assign||{}; DB.assign[id]=val.trim(); save(); }
+function setAssign(id,val){ DB.assign=DB.assign||{}; DB.assign[id]=val.trim(); sb.from('profiles').update({assigned_name:val.trim()}).eq('login_id',id).then(()=>{},e=>console.warn('assign',e)); }
 function filterLoginRows(q){ q=(q||'').toLowerCase().trim();
   document.querySelectorAll('#loginRows tr').forEach(tr=>{ const s=tr.dataset.s||''; tr.style.display=s.includes(q)?'':'none'; }); }
 function loginRoleLabel(r){ return r==='admin'?'Super Admin':r==='vcm'?'Admin (VCM)':r==='staff'?'Staff':'Devotee'; }
 function viewLogins(){
   DB.assign=DB.assign||{};
   const order={admin:0,vcm:1,staff:2,brahmachari:3};
-  const list=[...USERS].sort((a,b)=> (order[a.role]-order[b.role]) || a.id.localeCompare(b.id));
-  const rows=list.map(u=>{ const to=DB.assign[u.id]||''; const rl=loginRoleLabel(u.role);
-    return `<tr data-s="${esc((u.id+' '+rl+' '+to).toLowerCase())}">
-      <td><span class="rcp-copy" onclick="copyStr('${u.id}','ID')" title="Click to copy">${u.id}</span></td>
-      <td><span class="rcp-copy" onclick="copyStr('${u.pass}','Password')" title="Click to copy">${u.pass}</span></td>
+  const list=[...(DB.loginList||[])].sort((a,b)=> (order[a.role]-order[b.role]) || a.login_id.localeCompare(b.login_id));
+  const rows=list.map(u=>{ const to=DB.assign[u.login_id]||''; const rl=loginRoleLabel(u.role);
+    return `<tr data-s="${esc((u.login_id+' '+rl+' '+to).toLowerCase())}">
+      <td><span class="rcp-copy" onclick="copyStr('${u.login_id}','ID')" title="Click to copy">${u.login_id}</span></td>
       <td>${rl}</td>
-      <td><input type="text" value="${esc(to)}" placeholder="type person's name" style="min-width:170px" onchange="setAssign('${u.id}',this.value)"></td>
+      <td><input type="text" value="${esc(to)}" placeholder="type person's name" style="min-width:170px" onchange="setAssign('${u.login_id}',this.value)"></td>
     </tr>`; }).join('');
-  const counts=['admin','vcm','staff','brahmachari'].map(r=>loginRoleLabel(r)+': '+USERS.filter(u=>u.role===r).length).join(' · ');
+  const counts=['admin','vcm','staff','brahmachari'].map(r=>loginRoleLabel(r)+': '+list.filter(u=>u.role===r).length).join(' · ');
   return `<div class="card"><h2 class="section">🔑 Logins</h2>
-    <p class="subhead">All ${USERS.length} login IDs and passwords. Only these can log in. Click an ID or password to copy it, then type the person's name in <b>Assigned to</b>. That name is what shows when they log in, and every booking they make is recorded under it. ${counts}.</p>
+    <p class="subhead">All ${list.length} login accounts. Passwords are stored securely (hashed) and can't be shown here — share them from your CSV/PDF. Type each person's name in <b>Assigned to</b>; that name shows when they log in and is recorded on every booking they make. ${counts}.</p>
     <input placeholder="🔍 Search ID, role, or assigned name" value="${esc(searchQ['loginRows']||'')}" oninput="setSearch('loginRows',this.value)" style="max-width:360px;margin-bottom:10px">
     <div style="overflow:auto">
-    <table><thead><tr><th>Login ID</th><th>Password</th><th>Role</th><th>Assigned to (person's name)</th></tr></thead>
+    <table><thead><tr><th>Login ID</th><th>Role</th><th>Assigned to (person's name)</th></tr></thead>
       <tbody id="loginRows">${rows}</tbody></table></div></div>`;
 }
 
