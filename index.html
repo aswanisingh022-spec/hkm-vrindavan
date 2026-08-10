@@ -172,6 +172,7 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script>
 /* ---------------- Data layer (Supabase cloud) ---------------- */
 const DB_KEY = 'hkm_portal_v30';
@@ -312,15 +313,16 @@ async function loadFromCloud(){
     sb.from('donations').select('booking_id,receipt,donation_verified,receipt_wrong'),
     (role==='admin'||role==='vcm') ? sb.from('notifications').select('id,data,ack,ts').order('ts',{ascending:false}).limit(300) : Promise.resolve({data:[]})
   ]);
-  DB.hotels=(hotelsR.data||[]).map(r=>r.data).sort((a,b)=>(a.priority||99)-(b.priority||99));
-  DB.rules=Object.assign(JSON.parse(JSON.stringify(DEFAULT_RULES)),(rulesR.data&&rulesR.data.data)||{});
+  // If the server returned an error, KEEP the current data (never wipe the screen on a transient failure)
+  if(hotelsR.error||bookingsR.error){ console.warn('Cloud load error — keeping current data', hotelsR.error||bookingsR.error); return; }
+  if(Array.isArray(hotelsR.data)) DB.hotels=hotelsR.data.map(r=>r.data).sort((a,b)=>(a.priority||99)-(b.priority||99));
+  if(rulesR && rulesR.data && rulesR.data.data) DB.rules=Object.assign(JSON.parse(JSON.stringify(DEFAULT_RULES)),rulesR.data.data);
   const dmap={}; (donationsR.data||[]).forEach(d=>dmap[d.booking_id]=d);
   let amap={};
   if(role==='admin'||role==='brahmachari'){ const amtR=await sb.from('amounts').select('booking_id,amount'); (amtR.data||[]).forEach(a=>amap[a.booking_id]=Number(a.amount)); }
-  DB.bookings=(bookingsR.data||[]).map(r=>{ const b=Object.assign({},r.data); b.id=r.id; b.devId=r.dev_id||''; const d=dmap[r.id]; if(d){ b.receipt=d.receipt||''; b.donationVerified=!!d.donation_verified; b.receiptWrong=!!d.receipt_wrong; } b.donation = (amap[r.id]!=null) ? amap[r.id] : catFloor(b.donationCategory); return b; });
-  DB.notifications=(notifsR.data||[]).map(n=>Object.assign({},n.data,{id:n.id,ack:!!n.ack,ts:n.ts?Date.parse(n.ts):Date.now()}));
-  DB.assign={}; DB.loginList=[];
-  if(role==='admin'){ const pr=await sb.from('profiles').select('login_id,role,assigned_name'); (pr.data||[]).forEach(p=>{ DB.loginList.push(p); DB.assign[p.login_id]=p.assigned_name||''; }); }
+  if(Array.isArray(bookingsR.data)) DB.bookings=bookingsR.data.map(r=>{ const b=Object.assign({},r.data); b.id=r.id; b.devId=r.dev_id||''; const d=dmap[r.id]; if(d){ b.receipt=d.receipt||''; b.donationVerified=!!d.donation_verified; b.receiptWrong=!!d.receipt_wrong; } b.donation = (amap[r.id]!=null) ? amap[r.id] : catFloor(b.donationCategory); return b; });
+  if(Array.isArray(notifsR.data)) DB.notifications=notifsR.data.map(n=>Object.assign({},n.data,{id:n.id,ack:!!n.ack,ts:n.ts?Date.parse(n.ts):Date.now()}));
+  if(role==='admin'){ const pr=await sb.from('profiles').select('login_id,role,assigned_name'); if(Array.isArray(pr.data)){ DB.assign={}; DB.loginList=[]; pr.data.forEach(p=>{ DB.loginList.push(p); DB.assign[p.login_id]=p.assigned_name||''; }); } }
   syncHotelMinFromRules();
 }
 async function syncToCloud(){
@@ -328,7 +330,8 @@ async function syncToCloud(){
   if(role==='staff') return;
   const mine=DB.bookings.filter(b=> (role==='admin'||role==='vcm') ? true : b.devId===mylogin);
   if(mine.length){
-    await sb.from('bookings').upsert(mine.map(b=>({id:b.id,dev_id:b.devId||null,data:bookingData(b)})));
+    const up=await sb.from('bookings').upsert(mine.map(b=>({id:b.id,dev_id:b.devId||null,data:bookingData(b)})));
+    if(up.error){ console.warn('booking save failed', up.error); toast('⚠ Could not save to server — please check your connection and try again'); return; }
     await sb.from('donations').upsert(mine.map(b=>({booking_id:b.id,receipt:b.receipt||'',donation_verified:!!b.donationVerified,receipt_wrong:!!b.receiptWrong})));
     if(role!=='vcm'){ await sb.from('amounts').upsert(mine.map(b=>({booking_id:b.id,amount:Number(b.donation)||0}))); }
   }
@@ -337,7 +340,13 @@ async function syncToCloud(){
   if((role==='admin'||role==='vcm') && DB.notifications.length) await sb.from('notifications').upsert(DB.notifications.slice(0,300).map(n=>({id:n.id,data:n,ack:!!n.ack,ts:new Date(n.ts||Date.now()).toISOString()}))).then(()=>{},()=>{});
 }
 let _pollTimer=null;
-function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) return; const ae=document.activeElement; if(ae&&/INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return; try{ await loadFromCloud(); render(); if(USER.role==='admin'||USER.role==='vcm') updateNotifBadge(); }catch(e){} }, 15000); }
+function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) return;
+  // NEVER auto-refresh while the user is filling or editing a form — it would wipe their input
+  if(currentTab==='newreq') return;
+  if(typeof editingId!=='undefined' && editingId) return;
+  const ae=document.activeElement; if(ae&&/INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;
+  try{ await loadFromCloud(); render(); if(USER.role==='admin'||USER.role==='vcm') updateNotifBadge(); }catch(e){}
+}, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 if(!DB.notifications) DB.notifications=[];
 if(!DB.assign) DB.assign={};   // login ID -> person the credential was given to
@@ -749,14 +758,57 @@ function guestReopen(id){ const b=DB.bookings.find(x=>x.id===id); if(!b)return;
   b.status='pending'; b.edited=true; notify('reopen',`Reopened: ${b.head} — needs allocation`,b.brahmachari,b.id); save(); render(); toast('Request reopened — sent to admin'); }
 
 /* ---------------- Brahmachari: My Requests ---------------- */
+/* Build a shareable image of a single request and open the phone's share sheet (WhatsApp etc.) */
+async function shareRequest(id){
+  const b=DB.bookings.find(x=>x.id===id); if(!b){ toast('Request not found'); return; }
+  if(typeof html2canvas!=='function'){ toast('Image tool still loading — try again in a moment'); return; }
+  const statusTxt = b.status==='confirmed' ? 'Confirmed ✅'
+    : ((b.donation||0)>=(DB.rules.freeMin||50000) ? 'Confirmed — room assured ✅' : 'Pending');
+  const locTxt = b.status==='confirmed' ? (hotelName(b.hotel)+(b.roomType?(' · '+b.roomType+(b.rooms>1?(' × '+b.rooms):'')):'')) : 'To be allocated';
+  const row=(k,v)=>`<tr><td style="color:#7a6a58;padding:5px 0;font-size:13px">${k}</td><td style="text-align:right;font-weight:700;padding:5px 0;font-size:13px">${esc(v)}</td></tr>`;
+  const card=document.createElement('div');
+  card.style.cssText='position:fixed;left:-9999px;top:0;width:360px;padding:20px;background:#fff9f0;font-family:system-ui,-apple-system,Arial,sans-serif;color:#2b2118;border:2px solid #e8891f;border-radius:16px';
+  card.innerHTML=`
+    <div style="text-align:center;margin-bottom:12px">
+      <div style="font-size:26px;line-height:1">☸</div>
+      <div style="font-weight:800;font-size:17px;margin-top:2px">HKM Vrindavan</div>
+      <div style="color:#c96f0d;font-size:12px">Accommodation Booking</div>
+    </div>
+    <table style="width:100%;border-collapse:collapse">
+      ${row('Guest', headLabel(b))}
+      ${row('People', peopleLabel(b))}
+      ${row('Dates', stayLabel(b)||'—')}
+      ${seeMoney()?row('Donation', money(b.donation)):''}
+      ${(seeMoney()&&b.receipt)?row('Receipt', b.receipt):''}
+      ${row('Status', statusTxt)}
+      ${row('Guest house', locTxt)}
+    </table>
+    <div style="text-align:center;color:#7a6a58;font-size:11px;margin-top:14px;border-top:1px dashed #ecdcc4;padding-top:8px">srivrindavan.com</div>`;
+  document.body.appendChild(card);
+  try{
+    const canvas=await html2canvas(card,{scale:2,backgroundColor:'#fff9f0'});
+    if(card.parentNode) document.body.removeChild(card);
+    const blob=await new Promise(res=>canvas.toBlob(res,'image/png'));
+    const file=new File([blob],'HKM-booking-'+(headLabel(b)||b.id)+'.png',{type:'image/png'});
+    if(navigator.canShare && navigator.canShare({files:[file]})){
+      try{ await navigator.share({files:[file], title:'HKM Vrindavan Booking', text:'Accommodation booking — '+headLabel(b)}); return; }catch(e){ if(e && e.name==='AbortError') return; }
+    }
+    if(navigator.clipboard && window.ClipboardItem){
+      try{ await navigator.clipboard.write([new ClipboardItem({'image/png':blob})]); toast('Booking image copied — paste it in WhatsApp'); return; }catch(e){}
+    }
+    const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=file.name; document.body.appendChild(a); a.click(); a.remove();
+    toast('Booking image saved — share it on WhatsApp');
+  }catch(e){ if(card.parentNode) document.body.removeChild(card); console.warn(e); toast('Could not create the image'); }
+}
 function viewMyReq(){
   const mine=DB.bookings.filter(b=>(b.devId&&b.devId===USER.id)||b.brahmachari===USER.name);
   if(!mine.length) return `<div class="card"><h2 class="section">📋 My Requests</h2><p class="muted">No requests yet. Create one from “New Request”.</p></div>`;
   const rows=mine.map(b=>{
     const dead=b.status==='cancelled'||b.status==='withdrawn';
+    const shareBtn=`<button class="btn sm" onclick="shareRequest('${b.id}')">📤 Share</button>`;
     const actions=dead
-      ? `<button class="btn gray sm" onclick="guestReopen('${b.id}')">Reopen</button>`
-      : `<button class="btn gray sm" onclick="guestEdit('${b.id}')">Edit</button>
+      ? shareBtn+`<button class="btn gray sm" onclick="guestReopen('${b.id}')">Reopen</button>`
+      : shareBtn+`<button class="btn gray sm" onclick="guestEdit('${b.id}')">Edit</button>
          <button class="btn gray sm" onclick="guestCancel('${b.id}')">Cancel</button>
          <button class="btn red sm" onclick="guestWithdraw('${b.id}')">Pull back</button>`;
     return `<tr>
