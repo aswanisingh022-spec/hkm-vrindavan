@@ -170,9 +170,9 @@
 
 <div id="toast" class="toast"></div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script>
 /* ---------------- Data layer (Supabase cloud) ---------------- */
 const DB_KEY = 'hkm_portal_v30';
@@ -306,24 +306,29 @@ function computeCat(amt){ const r=DB.rules, d=Number(amt)||0; return d>=r.d1Min?
 function bookingData(b){ const d=Object.assign({},b); delete d.donation; delete d.receipt; delete d.donationVerified; delete d.receiptWrong; delete d.devId; d.donationCategory=computeCat(b.donation); return d; }
 async function loadFromCloud(){
   const role=USER.role;
-  const [hotelsR, rulesR, bookingsR, donationsR, notifsR] = await Promise.all([
+  const isAdmin=role==='admin', wantAmounts=(role==='admin'||role==='brahmachari'), wantNotifs=(role==='admin'||role==='vcm');
+  const none=Promise.resolve({data:[]});
+  // Fetch EVERYTHING this role needs in ONE parallel batch (fast login)
+  const [hotelsR, rulesR, bookingsR, donationsR, notifsR, amtR, prR, crR] = await Promise.all([
     sb.from('hotels').select('data'),
     sb.from('rules').select('data').eq('id',1).maybeSingle(),
     sb.from('bookings').select('id,data,dev_id'),
     sb.from('donations').select('booking_id,receipt,donation_verified,receipt_wrong'),
-    (role==='admin'||role==='vcm') ? sb.from('notifications').select('id,data,ack,ts').order('ts',{ascending:false}).limit(300) : Promise.resolve({data:[]})
+    wantNotifs ? sb.from('notifications').select('id,data,ack,ts').order('ts',{ascending:false}).limit(300) : none,
+    wantAmounts ? sb.from('amounts').select('booking_id,amount') : none,
+    isAdmin ? sb.from('profiles').select('login_id,role,assigned_name') : none,
+    isAdmin ? sb.from('credentials').select('login_id,pw') : none
   ]);
   // If the server returned an error, KEEP the current data (never wipe the screen on a transient failure)
   if(hotelsR.error||bookingsR.error){ console.warn('Cloud load error — keeping current data', hotelsR.error||bookingsR.error); return; }
   if(Array.isArray(hotelsR.data)) DB.hotels=hotelsR.data.map(r=>r.data).sort((a,b)=>(a.priority||99)-(b.priority||99));
   if(rulesR && rulesR.data && rulesR.data.data) DB.rules=Object.assign(JSON.parse(JSON.stringify(DEFAULT_RULES)),rulesR.data.data);
   const dmap={}; (donationsR.data||[]).forEach(d=>dmap[d.booking_id]=d);
-  let amap={};
-  if(role==='admin'||role==='brahmachari'){ const amtR=await sb.from('amounts').select('booking_id,amount'); (amtR.data||[]).forEach(a=>amap[a.booking_id]=Number(a.amount)); }
+  const amap={}; (amtR.data||[]).forEach(a=>amap[a.booking_id]=Number(a.amount));
   if(Array.isArray(bookingsR.data)) DB.bookings=bookingsR.data.map(r=>{ const b=Object.assign({},r.data); b.id=r.id; b.devId=r.dev_id||''; const d=dmap[r.id]; if(d){ b.receipt=d.receipt||''; b.donationVerified=!!d.donation_verified; b.receiptWrong=!!d.receipt_wrong; } b.donation = (amap[r.id]!=null) ? amap[r.id] : catFloor(b.donationCategory); return b; });
   if(Array.isArray(notifsR.data)) DB.notifications=notifsR.data.map(n=>Object.assign({},n.data,{id:n.id,ack:!!n.ack,ts:n.ts?Date.parse(n.ts):Date.now()}));
-  if(role==='admin'){ const pr=await sb.from('profiles').select('login_id,role,assigned_name'); if(Array.isArray(pr.data)){ DB.assign={}; DB.loginList=[]; pr.data.forEach(p=>{ DB.loginList.push(p); DB.assign[p.login_id]=p.assigned_name||''; }); }
-    const cr=await sb.from('credentials').select('login_id,pw'); if(Array.isArray(cr.data)){ DB.creds={}; cr.data.forEach(c=>DB.creds[c.login_id]=c.pw); } }
+  if(isAdmin){ if(Array.isArray(prR.data)){ DB.assign={}; DB.loginList=[]; prR.data.forEach(p=>{ DB.loginList.push(p); DB.assign[p.login_id]=p.assigned_name||''; }); }
+    if(Array.isArray(crR.data)){ DB.creds={}; crR.data.forEach(c=>DB.creds[c.login_id]=c.pw); } }
   syncHotelMinFromRules();
 }
 async function syncToCloud(){
@@ -543,7 +548,14 @@ async function doLogin(){
   }catch(e){ toast('Login failed — check your connection'); console.warn(e); }
   finally{ if(btn){ btn.disabled=false; btn.textContent='Enter Portal'; } }
 }
-async function logout(){ try{ await sb.auth.signOut(); }catch(e){} USER=null; stopPoll(); $('#appView').classList.add('hidden'); $('#loginView').classList.remove('hidden'); const p=$('#loginPass'); if(p)p.value=''; }
+async function logout(){
+  // Flush any unsaved change to the cloud BEFORE signing out, so nothing is lost
+  try{ if(_saveTimer){ clearTimeout(_saveTimer); _saveTimer=null; } if(USER) await syncToCloud(); }catch(e){ console.warn('flush on logout',e); }
+  try{ await sb.auth.signOut(); }catch(e){}
+  USER=null; stopPoll(); $('#appView').classList.add('hidden'); $('#loginView').classList.remove('hidden'); const p=$('#loginPass'); if(p)p.value='';
+}
+/* Best-effort: also flush pending changes if the tab/browser is closed mid-edit */
+window.addEventListener('visibilitychange', function(){ if(document.visibilityState==='hidden' && USER && _saveTimer){ clearTimeout(_saveTimer); _saveTimer=null; try{ syncToCloud(); }catch(e){} } });
 
 /* ---------------- Navigation ---------------- */
 let currentTab='';
