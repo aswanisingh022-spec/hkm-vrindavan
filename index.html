@@ -117,6 +117,19 @@
   .seva-collect.done{color:var(--green);background:#e7f6ec;border-color:#bfe6cd}
   fieldset{border:1px dashed var(--line);border-radius:10px;padding:12px;margin-top:10px}
   legend{font-size:12px;color:var(--muted);padding:0 6px}
+  /* Mobile: stack wide tables into readable cards (no sideways scrolling) */
+  @media (max-width:640px){
+    table.stack-mobile{display:block;width:100%;border:0}
+    table.stack-mobile thead{position:absolute;left:-9999px;height:0;overflow:hidden}
+    table.stack-mobile tbody{display:block;width:100%}
+    table.stack-mobile tr{display:block;border:1px solid var(--line);border-radius:12px;background:#fff;padding:6px 12px;margin-bottom:12px;box-shadow:var(--shadow)}
+    table.stack-mobile td{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;width:auto;border:0;border-bottom:1px dashed var(--line);padding:8px 0;text-align:right}
+    table.stack-mobile tr td:last-child{border-bottom:0}
+    table.stack-mobile td::before{content:attr(data-label);font-weight:700;color:var(--muted);text-align:left;flex:0 0 40%;white-space:nowrap}
+    table.stack-mobile td .muted{text-align:right}
+    table.stack-mobile td .row-actions{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end}
+    table.stack-mobile td .btn.sm{flex:0 0 auto}
+  }
 </style>
 </head>
 <body>
@@ -747,18 +760,18 @@ function viewMyReq(){
          <button class="btn gray sm" onclick="guestCancel('${b.id}')">Cancel</button>
          <button class="btn red sm" onclick="guestWithdraw('${b.id}')">Pull back</button>`;
     return `<tr>
-    <td>${headLabel(b)}${b.edited?' <span class="pill p-edited">✏️ edited</span>':''}${b.receiptWrong?' <span class="pill p-rejected">⚠ receipt wrong — Edit &amp; give correct number</span>':''}<div class="muted">${peopleLabel(b)}${b.family?' · family':''}</div></td>
-    <td>${stayLabel(b)||'<span class="muted">—</span>'}</td>
-    <td>${money(b.donation)}</td>
-    <td>${sevaLabel(b)}</td>
-    <td>${b.extraRequested>0?(b.extraBeds>0?`<span class="pill p-confirmed">${b.extraBeds} given</span>`:`<span class="pill p-pending">${b.extraRequested} requested</span>`):'<span class="muted">—</span>'}</td>
-    <td>${devoteeStatusPill(b)}</td>
-    <td>${b.status==='confirmed'?allocDetailHTML(b)+(hotelSendContacts(b.hotel).length?`<div class="muted" style="color:var(--saffron-dark)">📞 ${hotelSendContacts(b.hotel).map(c=>esc(c.name)+' '+esc(c.phone)).join(' · ')}</div>`:''):'<span class="pill p-pending">Location pending</span>'}</td>
-    <td><div class="row-actions">${actions}</div></td>
+    <td data-label="Guests">${headLabel(b)}${b.edited?' <span class="pill p-edited">✏️ edited</span>':''}${b.receiptWrong?' <span class="pill p-rejected">⚠ receipt wrong — Edit &amp; give correct number</span>':''}<div class="muted">${peopleLabel(b)}${b.family?' · family':''}</div></td>
+    <td data-label="Dates">${stayLabel(b)||'<span class="muted">—</span>'}</td>
+    <td data-label="Donation">${money(b.donation)}</td>
+    <td data-label="Accommodation">${sevaLabel(b)}</td>
+    <td data-label="Extra bed">${b.extraRequested>0?(b.extraBeds>0?`<span class="pill p-confirmed">${b.extraBeds} given</span>`:`<span class="pill p-pending">${b.extraRequested} requested</span>`):'<span class="muted">—</span>'}</td>
+    <td data-label="Status">${devoteeStatusPill(b)}</td>
+    <td data-label="Location">${b.status==='confirmed'?allocDetailHTML(b)+(hotelSendContacts(b.hotel).length?`<div class="muted" style="color:var(--saffron-dark)">📞 ${hotelSendContacts(b.hotel).map(c=>esc(c.name)+' '+esc(c.phone)).join(' · ')}</div>`:''):'<span class="pill p-pending">Location pending</span>'}</td>
+    <td data-label="Actions"><div class="row-actions">${actions}</div></td>
   </tr>`; }).join('');
   return `<div class="card"><h2 class="section">📋 My Requests</h2>
     <p class="subhead">You can Edit a request, Cancel it, or Pull it back (withdraw). Cancelling or pulling back frees the room for others.</p>
-    <table><thead><tr><th>Guests</th><th>Dates</th><th>Donation</th><th>Accommodation</th><th>Extra bed</th><th>Status</th><th>Location</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table>
+    <table class="stack-mobile"><thead><tr><th>Guests</th><th>Dates</th><th>Donation</th><th>Accommodation</th><th>Extra bed</th><th>Status</th><th>Location</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table>
     <p class="muted" style="margin-top:10px;font-size:12px">💡 Donations of ₹50,000 or above receive free accommodation and your room is <b>assured</b> — Status shows <b>Confirmed</b> right away, and the exact guest house &amp; room (Location) is shared once it is allocated. For smaller donations, an accommodation seva is collected by the coordinator.</p></div>`;
 }
 
