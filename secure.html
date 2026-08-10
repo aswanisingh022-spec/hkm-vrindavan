@@ -303,8 +303,8 @@ async function loadFromCloud(){
   DB.rules=Object.assign(JSON.parse(JSON.stringify(DEFAULT_RULES)),(rulesR.data&&rulesR.data.data)||{});
   const dmap={}; (donationsR.data||[]).forEach(d=>dmap[d.booking_id]=d);
   let amap={};
-  if(role==='admin'){ const amtR=await sb.from('amounts').select('booking_id,amount'); (amtR.data||[]).forEach(a=>amap[a.booking_id]=Number(a.amount)); }
-  DB.bookings=(bookingsR.data||[]).map(r=>{ const b=Object.assign({},r.data); b.id=r.id; b.devId=r.dev_id||''; const d=dmap[r.id]; if(d){ b.receipt=d.receipt||''; b.donationVerified=!!d.donation_verified; b.receiptWrong=!!d.receipt_wrong; } b.donation = (role==='admin') ? (amap[r.id]!=null?amap[r.id]:0) : catFloor(b.donationCategory); return b; });
+  if(role==='admin'||role==='brahmachari'){ const amtR=await sb.from('amounts').select('booking_id,amount'); (amtR.data||[]).forEach(a=>amap[a.booking_id]=Number(a.amount)); }
+  DB.bookings=(bookingsR.data||[]).map(r=>{ const b=Object.assign({},r.data); b.id=r.id; b.devId=r.dev_id||''; const d=dmap[r.id]; if(d){ b.receipt=d.receipt||''; b.donationVerified=!!d.donation_verified; b.receiptWrong=!!d.receipt_wrong; } b.donation = (amap[r.id]!=null) ? amap[r.id] : catFloor(b.donationCategory); return b; });
   DB.notifications=(notifsR.data||[]).map(n=>Object.assign({},n.data,{id:n.id,ack:!!n.ack,ts:n.ts?Date.parse(n.ts):Date.now()}));
   DB.assign={}; DB.loginList=[];
   if(role==='admin'){ const pr=await sb.from('profiles').select('login_id,role,assigned_name'); (pr.data||[]).forEach(p=>{ DB.loginList.push(p); DB.assign[p.login_id]=p.assigned_name||''; }); }
