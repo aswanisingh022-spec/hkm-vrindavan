@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>HKM Vrindavan Accommodation Booking Portal</title>
+<title>Sri Vrindavan Accommodation Booking Portal</title>
 <style>
   :root{
     --saffron:#e8891f; --saffron-dark:#c96f0d; --gold:#d4a017;
@@ -140,7 +140,7 @@
     <div style="text-align:center;margin-bottom:8px">
       <div class="logo" style="margin:0 auto 8px;width:56px;height:56px;font-size:30px;background:var(--saffron);color:#fff">☸</div>
       <h1 style="margin:0;font-size:19px;font-weight:800;letter-spacing:.2px">Accommodation Booking Portal</h1>
-      <p style="margin:3px 0 0;font-family:cursive;font-size:22px;color:var(--saffron-dark)">HKM Vrindavan</p>
+      <p style="margin:3px 0 0;font-family:cursive;font-size:22px;color:var(--saffron-dark)">Sri Vrindavan</p>
     </div>
     <label>Login ID</label>
     <input id="loginId" placeholder="e.g. DEV001" autocapitalize="characters" autocomplete="off">
@@ -157,7 +157,7 @@
 <div id="appView" class="hidden">
   <header class="topbar">
     <div class="logo">☸</div>
-    <div class="brand"><h1 style="font-size:15px;font-weight:800">Accommodation Booking Portal</h1><p style="font-family:cursive;font-size:15px;opacity:1">HKM Vrindavan</p></div>
+    <div class="brand"><h1 style="font-size:15px;font-weight:800">Accommodation Booking Portal</h1><p style="font-family:cursive;font-size:15px;opacity:1">Sri Vrindavan</p></div>
     <div class="spacer"></div>
     <div class="who"><div id="whoName">—</div><div id="whoRole" style="opacity:.85"></div></div>
     <button class="btn ghost sm" onclick="logout()">Logout</button>
@@ -771,7 +771,7 @@ async function shareRequest(id){
   card.innerHTML=`
     <div style="text-align:center;margin-bottom:12px">
       <div style="font-size:26px;line-height:1">☸</div>
-      <div style="font-weight:800;font-size:17px;margin-top:2px">HKM Vrindavan</div>
+      <div style="font-weight:800;font-size:17px;margin-top:2px">Sri Vrindavan</div>
       <div style="color:#c96f0d;font-size:12px">Accommodation Booking</div>
     </div>
     <table style="width:100%;border-collapse:collapse">
@@ -790,14 +790,17 @@ async function shareRequest(id){
     if(card.parentNode) document.body.removeChild(card);
     const blob=await new Promise(res=>canvas.toBlob(res,'image/png'));
     const file=new File([blob],'HKM-booking-'+(headLabel(b)||b.id)+'.png',{type:'image/png'});
-    if(navigator.canShare && navigator.canShare({files:[file]})){
-      try{ await navigator.share({files:[file], title:'HKM Vrindavan Booking', text:'Accommodation booking — '+headLabel(b)}); return; }catch(e){ if(e && e.name==='AbortError') return; }
-    }
+    // 1) Copy the IMAGE to the clipboard so it can be pasted straight into WhatsApp
     if(navigator.clipboard && window.ClipboardItem){
-      try{ await navigator.clipboard.write([new ClipboardItem({'image/png':blob})]); toast('Booking image copied — paste it in WhatsApp'); return; }catch(e){}
+      try{ await navigator.clipboard.write([new ClipboardItem({'image/png':blob})]); toast('✅ Image copied — now paste it into WhatsApp'); return; }catch(e){ console.warn('clipboard image failed', e); }
     }
+    // 2) Fallback for browsers without image-clipboard: open the share sheet with the image
+    if(navigator.canShare && navigator.canShare({files:[file]})){
+      try{ await navigator.share({files:[file], title:'Sri Vrindavan Booking', text:'Accommodation booking — '+headLabel(b)}); return; }catch(e){ if(e && e.name==='AbortError') return; }
+    }
+    // 3) Last resort: download the image so it can be attached in WhatsApp
     const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=file.name; document.body.appendChild(a); a.click(); a.remove();
-    toast('Booking image saved — share it on WhatsApp');
+    toast('Image saved — attach it in WhatsApp');
   }catch(e){ if(card.parentNode) document.body.removeChild(card); console.warn(e); toast('Could not create the image'); }
 }
 function viewMyReq(){
@@ -805,7 +808,7 @@ function viewMyReq(){
   if(!mine.length) return `<div class="card"><h2 class="section">📋 My Requests</h2><p class="muted">No requests yet. Create one from “New Request”.</p></div>`;
   const rows=mine.map(b=>{
     const dead=b.status==='cancelled'||b.status==='withdrawn';
-    const shareBtn=`<button class="btn sm" onclick="shareRequest('${b.id}')">📤 Share</button>`;
+    const shareBtn=`<button class="btn sm" onclick="shareRequest('${b.id}')">📋 Copy image</button>`;
     const actions=dead
       ? shareBtn+`<button class="btn gray sm" onclick="guestReopen('${b.id}')">Reopen</button>`
       : shareBtn+`<button class="btn gray sm" onclick="guestEdit('${b.id}')">Edit</button>
