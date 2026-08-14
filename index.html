@@ -490,13 +490,14 @@ function buildPlans(b,allowExtra){
         plans.push({hotel:h,roomType:r.type,rooms,extra:grant,
           waste:capacity-b.count, extraShort:want-grant,       // how many requested extra beds this hotel can't provide
           catPref:catList.includes(h.id)?0:1,                  // the category's own hotel(s) suggested first
+          sameType:(b.roomType && r.type===b.roomType)?0:1,    // prefer the SAME room type the guest already had (e.g. 3-bed → 3-bed on transfer)
           pref:(b.preferred||[]).includes(h.id)?0:1, priority:h.priority||99});
         break;
       }
     });
   });
-  // category hotel first → fewest rooms (keep family together) → honor extra-bed request → least waste → preferred → priority
-  plans.sort((a,c)=> a.catPref-c.catPref || a.rooms-c.rooms || a.extraShort-c.extraShort || a.waste-c.waste || a.pref-c.pref || a.priority-c.priority);
+  // category hotel first → fewest rooms (keep family together) → SAME room type as before → honor extra-bed → least waste → preferred → priority
+  plans.sort((a,c)=> a.catPref-c.catPref || a.rooms-c.rooms || a.sameType-c.sameType || a.extraShort-c.extraShort || a.waste-c.waste || a.pref-c.pref || a.priority-c.priority);
   return plans;
 }
 function samePlan(a,c){ return a&&c&&a.hotel.id===c.hotel.id&&a.roomType===c.roomType&&a.rooms===c.rooms&&a.extra===c.extra; }
@@ -560,13 +561,13 @@ window.addEventListener('visibilitychange', function(){ if(document.visibilitySt
 /* ---------------- Navigation ---------------- */
 let currentTab='';
 function buildTabs(){
-  const adminTabs=[['dash','📊 Dashboard'],['requests','🆕 Requests'],['booked','✅ Booked'],['receipts','🧾 Receipts'],['collections','💰 Payments'],['braj','🏠 Braj Nidhi'],['report','📥 Report'],['notifs','🔔 Alerts<span id="notifBadge" class="tabbadge"></span>'],['hotels','🏨 Hotels'],['vacancy','🛏️ Vacancy']];
+  const adminTabs=[['dash','📊 Dashboard'],['requests','🆕 Requests'],['booked','✅ Booked'],['receipts','🧾 Receipts'],['seva','💰 To collect'],['collections','💰 Payments'],['braj','🏠 Braj Nidhi'],['report','📥 Report'],['notifs','🔔 Alerts<span id="notifBadge" class="tabbadge"></span>'],['hotels','🏨 Hotels'],['vacancy','🛏️ Vacancy']];
   const tabs = USER.role==='admin'
     ? [...adminTabs,['donations','🧾 Donations'],['logins','🔑 Logins'],['exports','📥 Excel'],['settings','⚙️ Settings']]
     : USER.role==='vcm'
     ? adminTabs
     : USER.role==='staff'
-    ? [['dash','📊 Dashboard'],['rooms','🛏️ Room Allocations'],['vacancy','🪟 Vacancy']]
+    ? [['dash','📊 Dashboard'],['seva','💰 To collect'],['rooms','🛏️ Room Allocations'],['vacancy','🪟 Vacancy']]
     : [['newreq','➕ New Request'],['myreq','📋 My Requests']];
   $('#tabs').innerHTML = tabs.map(([k,l])=>`<div class="tab" data-k="${k}" onclick="go('${k}')">${l}</div>`).join('');
   go(tabs[0][0]);
@@ -581,6 +582,7 @@ function render(){
     if(currentTab==='braj') b.innerHTML=viewBraj();
     if(currentTab==='receipts') b.innerHTML=viewReceipts();
     if(currentTab==='collections') b.innerHTML=viewCollections();
+    if(currentTab==='seva') b.innerHTML=viewSevaCollect();
     if(currentTab==='report') b.innerHTML=viewReport();
     if(currentTab==='notifs') b.innerHTML=viewNotifications();
     if(currentTab==='hotels') b.innerHTML=viewHotels();
@@ -591,6 +593,7 @@ function render(){
     if(currentTab==='settings') b.innerHTML= isSuper()?viewSettings():'';
   } else if(USER.role==='staff'){
     if(currentTab==='dash') b.innerHTML=viewDash();
+    if(currentTab==='seva') b.innerHTML=viewSevaCollect();
     if(currentTab==='rooms') b.innerHTML=viewStaffRooms();
     if(currentTab==='vacancy') b.innerHTML=viewStaffVacancy();
   } else {
@@ -668,6 +671,13 @@ function viewNewReq(){
     </div>
     <div><label>Donation receipt number <span id="rcpStar" style="color:var(--red)">*</span></label><input id="reqReceipt" placeholder="e.g. RCP-12345"></div>
     <p class="rooms-mini" id="typeNote" style="margin:4px 0 0">FR Guest — donation receipt number is required.</p>
+    <div id="sevaPlanWrap" style="margin-top:10px;background:#f6efe2;border:1px dashed var(--line);border-radius:10px;padding:10px 14px">
+      <label style="margin-top:0">💰 Low-amount / payment request — for donations below ₹50,000, who will arrange the accommodation seva?</label>
+      <select id="reqSevaPlan">
+        <option value="devotee">I (Devotee) will collect / arrange the seva</option>
+        <option value="staff">Staff will collect the seva</option>
+      </select>
+      <p class="rooms-mini" style="margin:4px 0 0">For donations of ₹50,000+ the stay is free and this is ignored. Otherwise the chosen person collects the seva; it shows up for Staff, VCM Guest House and Super Admin.</p></div>
     <p class="rooms-mini" style="margin:10px 0 0;color:var(--saffron-dark)">🎪 Festival stay only — book between ${fmtD(DB.rules.eventStart)} and ${fmtD(DB.rules.eventEnd)} ${DB.rules.eventStart.slice(0,4)}.</p>
     <div id="dateRows"></div>
     <label>Note / special request to coordinator</label><textarea id="reqNote" rows="3" placeholder="e.g. any preference, medical need, elderly guest, arrival time... The admin will see this."></textarea>
@@ -684,7 +694,7 @@ function prefillEdit(){ if(!editingId) return; const b=DB.bookings.find(x=>x.id=
   const set=(id,v)=>{ const e=$(id); if(e) e.value=v; };
   set('#reqHead',b.head||''); set('#reqPhone',b.phone||''); set('#reqType',b.guestType||'FR'); updateTypeUI(); set('#reqTotal',b.count||1); updateSummary();
   set('#reqDonation',b.donation||''); set('#reqReceipt',b.receipt||'');
-  set('#reqRooms',b.roomsRequested||1);
+  set('#reqRooms',b.roomsRequested||1); set('#reqSevaPlan',b.sevaPlan||'devotee');
   (b.preferred||[]).forEach(pid=>{ const c=document.querySelector('.prefHotel[value="'+pid+'"]'); if(c) c.checked=true; });
   renderDateRows();
   const st=b.stays&&b.stays.length?b.stays:[{checkin:b.checkin,checkout:b.checkout,extra:(b.extraRequested>0)}];
@@ -750,6 +760,7 @@ function submitReq(){
     donation:Number($('#reqDonation').value)||0,receipt:receipt,
     extraRequested:stays.filter(s=>s.extra).length,
     roomsRequested:rooms,
+    sevaPlan:(($('#reqSevaPlan')||{}).value||'devotee'),
     stays:stays, checkin:stays[0].checkin, checkout:stays[0].checkout,
     note:$('#reqNote').value.trim()};
   if(editingId){ const b=DB.bookings.find(x=>x.id===editingId);
@@ -1144,7 +1155,7 @@ function approve(id,skipReceipt){ const b=DB.bookings.find(x=>x.id===id); if(!b)
   const avail=(roomObj?roomObj.count:0)-roomsAssignedByType(h.id,b.roomType,id);
   if(b.rooms>avail){ toast('Only '+avail+' '+b.roomType+' room(s) free at '+h.name+' — reduce rooms'); return; }
   if((b.extraBeds||0)>0 && !h.extraBedding){ toast(h.name+' does not allow extra bedding — set extra beds to 0'); return; }
-  if(needsReceipt && !skipReceipt && b.donation<DB.rules.freeMin && !b.sevaCollected){ toast('Please record who collected the accommodation seva (Received by…) before confirming'); return; }
+  if(needsReceipt && !skipReceipt && b.donation<DB.rules.freeMin && !b.sevaCollected && !b.sevaOnArrival){ toast('Please record the accommodation seva (mark Paid or “pay on arrival”) before confirming'); return; }
   b.status='confirmed'; save(); render();
   const extraMsg=(b.extraBeds||0)>0?` + ${b.extraBeds} extra bed`:'';
   const cts=hotelSendContacts(h.id);
@@ -1503,7 +1514,19 @@ function viewReport(){
       <tbody id="reportRows">${rows||'<tr><td colspan="6" class="muted">No confirmed accommodations yet</td></tr>'}</tbody></table></div></div>`;
 }
 /* ---------------- Payments / Seva collected panel ---------------- */
-function sevaChannelLabel(b){ const v=b.sevaChannel; return v==='GPP'?"GPP's Team":v==='GuestHouse'?'Guest House Team':v==='Devotee'?('Devotee — '+esc(b.brahmachari)):'—'; }
+function sevaChannelLabel(b){ const v=b.sevaChannel; return v==='GPP'?"GPP's Team":v==='GuestHouse'?'Guest House Team':v==='Staff'?'Staff':v==='Devotee'?('Devotee — '+esc(b.brahmachari)):'—'; }
+/* Bookings that still need an accommodation seva collected (FR, below the free threshold, not settled) */
+function needsSeva(b){ return (b.guestType||'FR')==='FR' && (b.donation||0)<DB.rules.freeMin && !b.sevaCollected && !b.sevaOnArrival && b.status!=='cancelled' && b.status!=='withdrawn'; }
+function sevaPlanLabel(b){ return b.sevaPlan==='staff' ? '🧑‍🔧 Staff to collect' : '🙋 Devotee will collect'; }
+/* Record seva payment — works for Staff, VCM and Super Admin (targeted cloud write) */
+async function markSeva(id,mode){ const b=DB.bookings.find(x=>x.id===id); if(!b)return;
+  if(mode==='paid'){ b.sevaCollected=true; b.sevaOnArrival=false; b.sevaDate=new Date().toISOString().slice(0,10); if(!b.sevaChannel||b.sevaChannel==='') b.sevaChannel = isVcm()?'GuestHouse':isSuper()?'GPP':'Staff'; }
+  else if(mode==='arrival'){ b.sevaOnArrival=true; b.sevaCollected=false; }
+  else if(mode==='undo'){ b.sevaCollected=false; b.sevaOnArrival=false; }
+  render();
+  try{ const {error}=await sb.from('bookings').update({data:bookingData(b),dev_id:b.devId||null}).eq('id',b.id);
+    if(error){ console.warn('seva save',error); toast('⚠ Could not save — check connection'); } else toast(mode==='paid'?'Marked paid ✓':mode==='arrival'?'Marked: pay on arrival':'Reset'); }catch(e){ console.warn(e); }
+}
 function viewCollections(){
   const paid=DB.bookings.filter(b=>b.sevaCollected);
   const rows=paid.map(b=>`<tr>
@@ -1520,6 +1543,32 @@ function viewCollections(){
     <p class="subhead">Every guest whose room seva has been collected — through any channel (GPP's Team, Guest House Team, or a Devotee).</p>
     <div class="scrollx"><table><thead><tr><th>Guest / Family</th><th>Devotee</th><th>Guest house</th><th>Room</th><th>Payment</th><th>Received by</th><th>Date</th><th>Receipt no.</th></tr></thead>
       <tbody>${rows||'<tr><td colspan="8" class="muted">No seva collected yet</td></tr>'}</tbody></table></div></div>`;
+}
+/* ---------------- Seva to collect (Staff, VCM, Super Admin) ---------------- */
+function viewSevaCollect(){
+  const pending=DB.bookings.filter(needsSeva);
+  const onArrival=DB.bookings.filter(b=>b.sevaOnArrival && !b.sevaCollected && b.status!=='cancelled' && b.status!=='withdrawn');
+  const amt=b=>seeMoney()?money(b.donation):catBadge(b);
+  const row=b=>`<tr data-search="${esc(((b.head||'')+' '+(b.phone||'')).toLowerCase())}">
+    <td data-label="Guest"><b>${esc(headLabel(b))}</b><div class="muted">by ${esc(b.brahmachari)} · ${esc(peopleLabel(b))}</div></td>
+    <td data-label="Donation">${amt(b)}</td>
+    <td data-label="Who collects">${sevaPlanLabel(b)}</td>
+    <td data-label="Dates">${esc(stayLabel(b)||'—')}</td>
+    <td data-label="Action"><div class="row-actions"><button class="btn green sm" onclick="markSeva('${b.id}','paid')">✅ Mark paid</button><button class="btn sm" onclick="markSeva('${b.id}','arrival')">🕓 Pay on arrival</button></div></td></tr>`;
+  const arrRow=b=>`<tr data-search="${esc(((b.head||'')+' '+(b.phone||'')).toLowerCase())}">
+    <td data-label="Guest"><b>${esc(headLabel(b))}</b><div class="muted">by ${esc(b.brahmachari)} · ${esc(peopleLabel(b))}</div></td>
+    <td data-label="Donation">${amt(b)}</td>
+    <td data-label="Status"><span class="pill p-waitlist">🕓 Pay on arrival</span></td>
+    <td data-label="Dates">${esc(stayLabel(b)||'—')}</td>
+    <td data-label="Action"><div class="row-actions"><button class="btn green sm" onclick="markSeva('${b.id}','paid')">✅ Mark paid</button><button class="btn gray sm" onclick="markSeva('${b.id}','undo')">Undo</button></div></td></tr>`;
+  return `<div class="card"><h2 class="section">💰 Seva to collect <span class="pill p-pending">${pending.length}</span></h2>
+    <p class="subhead">Guests with a donation below ₹50,000 whose accommodation seva still needs collecting. Press <b>Mark paid</b> once collected, or <b>Pay on arrival</b>. It updates for Staff, VCM Guest House and Super Admin, and lets the room be confirmed.</p>
+    <input placeholder="🔍 Search by guest name or number" value="${esc(searchQ['sevaRows']||'')}" oninput="setSearch('sevaRows',this.value)" style="margin-bottom:10px;max-width:360px">
+    <div class="scrollx"><table class="stack-mobile"><thead><tr><th>Guest / Family</th><th>Donation</th><th>Who collects</th><th>Dates</th><th>Action</th></tr></thead>
+      <tbody id="sevaRows">${pending.map(row).join('')||'<tr><td colspan="5" class="muted">Nothing pending — all seva collected 🎉</td></tr>'}</tbody></table></div>
+    ${onArrival.length?`<h2 class="section" style="margin-top:16px">🕓 Pay on arrival <span class="pill p-waitlist">${onArrival.length}</span></h2>
+    <div class="scrollx"><table class="stack-mobile"><thead><tr><th>Guest / Family</th><th>Donation</th><th>Status</th><th>Dates</th><th>Action</th></tr></thead>
+      <tbody>${onArrival.map(arrRow).join('')}</tbody></table></div>`:''}</div>`;
 }
 /* ---------------- Super Admin: Settings (rules) ---------------- */
 function setRule(f,v){ DB.rules[f]=Math.max(0,parseInt(v)||0); syncHotelMinFromRules(); const c=recalcPending(); save(); render();
