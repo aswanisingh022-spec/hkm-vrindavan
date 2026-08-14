@@ -654,7 +654,7 @@ function viewNewReq(){
     <p class="subhead">${editing?'Update your request below and press Update. The admin will see it was edited.':'Note: One request per family. Enter the name of the head of the family and the total number of people. Please mention any Guest house preference or special requirements in the Notes section. The admin will decide and allocate the guest house based on availability.'}</p>
     <div class="grid g2">
       <div><label>Head of family (name)</label><input id="reqHead" placeholder="e.g. Raj Sharma"></div>
-      <div><label>Guest mobile number</label><input id="reqPhone" type="tel" placeholder="e.g. 98765 43210"></div>
+      <div><label>Guest mobile number</label><input id="reqPhone" type="tel" inputmode="numeric" maxlength="10" oninput="this.value=this.value.replace(/[^0-9]/g,'').slice(0,10)" placeholder="10-digit mobile number"><div class="rooms-mini">Must be exactly 10 digits</div></div>
     </div>
     <div class="grid g2" style="margin-top:10px">
       <div><label>Total number of people (including family head)</label>${reqStepper('reqTotal',1)}<div class="rooms-mini">Count everyone, including the head of the family</div></div>
@@ -750,6 +750,8 @@ function submitReq(){
   const guestType=($('#reqType')||{}).value||'FR';
   const receipt=$('#reqReceipt').value.trim();
   if(guestType==='FR' && !receipt){ toast('Donation receipt number is required for an FR Guest'); return; }
+  const phoneDigits=($('#reqPhone').value||'').replace(/\D/g,'');
+  if(phoneDigits && phoneDigits.length!==10){ toast('Guest mobile number must be exactly 10 digits'); return; }
   const pref=[];
   const cis=[...document.querySelectorAll('.ci')], cos=[...document.querySelectorAll('.co')], exs=[...document.querySelectorAll('.exBed')];
   const stays=cis.map((el,idx)=>({checkin:el.value, checkout:(cos[idx]||{}).value||'', extra:!!(exs[idx]&&exs[idx].checked)}));
@@ -759,7 +761,7 @@ function submitReq(){
     if(s.checkout<=s.checkin){ toast('Room '+(i+1)+': check-out must be after check-in'); return; }
     if(s.checkin<DB.rules.eventStart || s.checkout>DB.rules.eventEnd){ toast('Dates must be within the festival window: '+fmtD(DB.rules.eventStart)+' to '+fmtD(DB.rules.eventEnd)); return; } }
   const rooms=Math.max(1,parseInt($('#reqRooms').value)||1);
-  const data={head:head,phone:$('#reqPhone').value.trim(),guestType:guestType,accompanying:total-1,count:total,family:total>1,preferred:pref,
+  const data={head:head,phone:phoneDigits,guestType:guestType,accompanying:total-1,count:total,family:total>1,preferred:pref,
     donation:Number($('#reqDonation').value)||0,receipt:receipt,
     extraRequested:stays.filter(s=>s.extra).length,
     roomsRequested:rooms,
