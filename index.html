@@ -169,6 +169,14 @@
 </div>
 
 <div id="toast" class="toast"></div>
+<div id="noticeOverlay" onclick="if(event.target===this)closeNotice()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;align-items:center;justify-content:center;padding:18px">
+  <div style="background:#fff;max-width:420px;width:100%;border-radius:16px;padding:22px 20px;box-shadow:0 12px 40px rgba(0,0,0,.25)">
+    <div id="noticeIcon" style="font-size:34px;text-align:center;margin-bottom:6px">ℹ️</div>
+    <div id="noticeTitle" style="font-weight:800;font-size:17px;text-align:center;margin-bottom:8px"></div>
+    <div id="noticeBody" style="font-size:14px;line-height:1.5;color:#444;text-align:center"></div>
+    <button onclick="closeNotice()" style="margin-top:16px;width:100%;padding:11px;border:none;border-radius:10px;background:var(--saffron,#e8820c);color:#fff;font-weight:700;font-size:15px;cursor:pointer">Got it</button>
+  </div>
+</div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script defer src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -403,6 +411,10 @@ function stayLabel(b){
 function statusPill(s){ const m={pending:'p-pending',confirmed:'p-confirmed',rejected:'p-rejected',waitlist:'p-waitlist',cancelled:'p-cancelled',withdrawn:'p-withdrawn'};
   return `<span class="pill ${m[s]||'p-pending'}">${s}</span>`; }
 function toast(msg){ const t=$('#toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),2200); }
+function showNotice(title,bodyHTML,icon){ $('#noticeIcon').textContent=icon||'ℹ️'; $('#noticeTitle').textContent=title; $('#noticeBody').innerHTML=bodyHTML; $('#noticeOverlay').style.display='flex'; }
+function closeNotice(){ $('#noticeOverlay').style.display='none'; }
+/* Total un-allocated rooms across all active guest houses (0 = fully booked). */
+function totalFreeRooms(){ return DB.hotels.filter(h=>h.active).reduce((s,h)=>s+h.rooms.reduce((a,r)=>a+vacantRooms(h.id,r.type,r.count),0),0); }
 
 /* capacity used per hotel (sum of allocated rooms*cap not needed; track allocated guests) */
 function hotelCapacity(h){ return h.rooms.reduce((s,r)=>s+r.cap*r.count,0); }
@@ -794,11 +806,15 @@ function submitReq(){
     if(b){ Object.assign(b,data); b.edited=true; b.editedAt=Date.now(); b.editedBy=USER.id; b.lastEditNote='Devotee updated the request (now '+b.count+' '+(b.count===1?'person':'people')+', '+b.roomsRequested+' room(s))'; b.receiptWrong=false;
       notify('edit',`Edited request: ${b.head} (now ${b.count} ${b.count===1?'person':'people'}, ${b.roomsRequested} room(s)${b.extraRequested?`, ${b.extraRequested} extra bed`:''}) — review allocation`,USER.name,b.id); }
     editingId=null; save(); toast('Request updated ✓ — admin notified'); go('myreq'); return; }
+  const full = totalFreeRooms()<=0;
   const b=Object.assign({id:uid('b'),brahmachari:USER.name,devId:USER.id,extraBeds:0,
-    status:'pending',hotel:'',roomType:'',rooms:0,created:Date.now()},data);
+    status:'pending',hotel:'',roomType:'',rooms:0,created:Date.now(),bookedWhenFull:full},data);
   DB.bookings.unshift(b);
-  notify('new',`New request: ${b.head} (${b.count} ${b.count===1?'person':'people'}) — ${b.roomsRequested} room(s)${b.extraRequested?`, ${b.extraRequested} extra bed`:''}`,USER.name,b.id);
-  save(); toast('Request submitted ✓'); go('myreq');
+  notify('new',`New request: ${b.head} (${b.count} ${b.count===1?'person':'people'}) — ${b.roomsRequested} room(s)${b.extraRequested?`, ${b.extraRequested} extra bed`:''}${full?' — ⚠ received while fully booked (waitlist)':''}`,USER.name,b.id);
+  save(); go('myreq');
+  if(full){ showNotice('Request received — currently full',
+    `All rooms are booked right now, so your request goes on the <b>waiting list</b>.<br><br>A room can open up if a confirmed guest doesn\'t arrive or cancels. You can also <b>speak with the guest house team</b> to check on availability.<br><br>The team has been notified and will allocate a room as soon as one is free.`, '🕓'); }
+  else toast('Request submitted ✓');
 }
 function guestEdit(id){ editingId=id; go('newreq'); }
 function guestCancel(id){ const b=DB.bookings.find(x=>x.id===id); if(!b)return;
@@ -997,7 +1013,8 @@ function guestCell(b,withSug){
   const reqRoomsTxt=b.roomsRequested>0?` · 🚪 ${b.roomsRequested} separate room(s) requested`:'';
   const dates=stayLabel(b);
   const catTag = (b.guestType&&b.guestType!=='FR') ? ' <span class="pill p-waitlist">'+esc(b.guestType)+'</span>' : ' '+catBadge(b);
-  return `<b>${headLabel(b)}</b>${catTag}${editedTag(b)}${b.receiptWrong?' <span class="pill p-rejected">✗ receipt wrong</span>':''}<div class="muted">requested by ${esc(b.brahmachari)}${b.phone?` · 📱 ${esc(b.phone)}`:''}</div>
+  const fullTag = (b.bookedWhenFull && !b.hotel && b.status!=='confirmed') ? ' <span class="pill p-waitlist" title="Booked while all rooms were full">🕓 waitlist</span>' : '';
+  return `<b>${headLabel(b)}</b>${catTag}${fullTag}${editedTag(b)}${b.receiptWrong?' <span class="pill p-rejected">✗ receipt wrong</span>':''}<div class="muted">requested by ${esc(b.brahmachari)}${b.phone?` · 📱 ${esc(b.phone)}`:''}</div>
       <div class="muted">${peopleLabel(b)}${b.family?' · 👪 family':''}${b.extraRequested>0?` · 🛏️ ${b.extraRequested} extra bed requested`:''}${reqRoomsTxt}</div>
       ${dates?`<div class="muted" style="color:var(--saffron-dark)">${dates}</div>`:''}
       ${b.note?`<div class="muted" style="background:#fff4e4;border-radius:6px;padding:4px 8px;margin-top:4px">📝 ${esc(b.note)}</div>`:''}${sugHTML}`;
@@ -1189,8 +1206,11 @@ function setSevaChannel(id,v){ const b=DB.bookings.find(x=>x.id===id); if(!b)ret
 function devoteeStatusPill(b){
   if(b.status==='confirmed') return '<span class="pill p-confirmed">Confirmed</span>';
   if(b.status==='cancelled'||b.status==='withdrawn'||b.status==='rejected') return statusPill(b.status);
+  const waitNote = (b.bookedWhenFull && !b.hotel)
+    ? `<div class="rooms-mini" style="margin-top:4px;color:var(--amber);background:#fdf0dc;border:1px solid #f0d9b0;border-radius:8px;padding:4px 8px">🕓 Currently full — on the waiting list. A room may open if a guest doesn\'t arrive; you can also contact the guest house team.</div>`
+    : '';
   const assured=(b.donation>=DB.rules.freeMin);   // ₹50k+ → accommodation assured immediately (location shared later)
-  return assured ? '<span class="pill p-confirmed">Confirmed</span><div class="rooms-mini" style="margin-top:3px">room assured</div>' : '<span class="pill p-pending">Pending</span>'; }
+  return (assured ? '<span class="pill p-confirmed">Confirmed</span><div class="rooms-mini" style="margin-top:3px">room assured</div>' : '<span class="pill p-pending">Pending</span>') + waitNote; }
 /* accommodation payment status shown to the devotee */
 function sevaLabel(b){
   if((b.guestType||'FR')!=='FR') return `<span class="pill p-confirmed">🎫 ${esc(b.guestType)}</span>`;   // PR / Media / Volunteer: no seva prompt
