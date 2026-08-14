@@ -421,14 +421,36 @@ function staySplit(b){
   const h=DB.hotels.find(x=>x.id===b.hotel); if(!h||!h.availableUntil||!h.transferTo) return null;
   if(!b.checkin||!b.checkout || b.checkout<=h.availableUntil) return null;   // stay ends on/before cutoff → no split
   const to=DB.hotels.find(x=>x.id===h.transferTo); if(!to) return null;
-  return [{name:h.name, from:b.checkin, to:h.availableUntil}, {name:to.name, from:h.availableUntil, to:b.checkout}];
+  return [{name:h.name, from:b.checkin, to:h.availableUntil, hid:h.id}, {name:to.name, from:h.availableUntil, to:b.checkout, hid:to.id}];
+}
+/* Rooms available in the Braj Nidhi continuation house */
+function brajRoomsList(){ const h=DB.hotels.find(x=>x.id==='h1'); return h?h.rooms:[]; }
+/* Smart default room type for the Braj Nidhi continuation of a split stay:
+   1) keep the same room type name if Braj Nidhi offers it (e.g. origin 3-bed → Braj Nidhi 3-bed);
+   2) otherwise the smallest Braj Nidhi room that fits the whole group (1 person → smallest room);
+   3) fall back to the largest room. */
+function defaultTransferType(b){
+  const rooms=brajRoomsList(); if(!rooms.length) return '';
+  if(b.roomType && rooms.some(r=>r.type===b.roomType)) return b.roomType;
+  const sorted=rooms.slice().sort((a,c)=>a.cap-c.cap);
+  const fit=sorted.find(r=>r.cap>=(b.count||1));
+  return (fit||sorted[sorted.length-1]).type;
+}
+/* The Braj Nidhi continuation room {type,rooms}: admin/VCM-set values if present, else smart default. */
+function transferPlan(b){
+  const type=b.transferRoomType||defaultTransferType(b);
+  const rObj=brajRoomsList().find(r=>r.type===type);
+  const rooms=(b.transferRooms>0)?b.transferRooms:(rObj?Math.max(1,Math.ceil((b.count||1)/rObj.cap)):1);
+  return {type, rooms};
 }
 /* Location detail for a confirmed booking, showing the date-based split across two hotels when it applies. */
 function allocDetailHTML(b){
   const split=staySplit(b);
   if(!split) return `<b>${esc(hotelName(b.hotel))}</b><div class="muted">${allocSummary(b)}</div>`;
-  return `<div class="muted" style="margin-bottom:2px">${allocSummary(b)} — split by dates:</div>`+
-    split.map((s,i)=>`<div><b>${i===0?'①':'②'} ${esc(s.name)}</b> <span class="muted">📅 ${fmtD(s.from)} → ${fmtD(s.to)}</span></div>`).join('');
+  const tp=transferPlan(b);
+  const roomFor=(i)=> i===0 ? allocSummary(b) : `${tp.type} × ${tp.rooms}`;
+  return `<div class="muted" style="margin-bottom:2px">split by dates:</div>`+
+    split.map((s,i)=>`<div><b>${i===0?'①':'②'} ${esc(s.name)}</b> <span class="muted">📅 ${fmtD(s.from)} → ${fmtD(s.to)} · ${esc(roomFor(i))}</span></div>`).join('');
 }
 /* compact hotel text (for narrow views like staff) showing the split when it applies */
 function allocHotelText(b){ const split=staySplit(b); if(!split) return esc(hotelName(b.hotel));
@@ -923,6 +945,23 @@ function allocCell(b){
   if(selHotel&&selHotel.minDonation>0&&b.donation<selHotel.minDonation) meta.push(`<span style="color:var(--red)">⚠ ${seeMoney()?'below '+money(selHotel.minDonation)+' min':'guest not eligible for this house'}</span>`);
   if(selHotel&&!selHotel.extraBedding&&b.extraRequested>0) meta.push(`<span style="color:var(--red)">no extra bed (asked ${b.extraRequested})</span>`);
   const metaLine=meta.length?`<div class="a-meta">${meta.join(' · ')}</div>`:'';
+  // Braj Nidhi continuation room for split/extended stays (past the origin hotel's cutoff)
+  let transferCtl='';
+  const split=staySplit(b);
+  if(split){
+    const tp=transferPlan(b);
+    const braj=DB.hotels.find(h=>h.id==='h1')||{rooms:[]};
+    const tOpts=braj.rooms.map(r=>`<option value="${r.type}" ${tp.type===r.type?'selected':''}>${r.type} · ${vacantRooms('h1',r.type,r.count)} free</option>`).join('');
+    const tObj=braj.rooms.find(r=>r.type===tp.type);
+    const tbeds=tObj?tp.rooms*tObj.cap:0;
+    const auto=!b.transferRoomType?'<span class="muted" style="font-size:11px"> · auto</span>':'';
+    transferCtl=`<div class="a-transfer" style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--border)">
+       <div class="a-lbl" style="margin-bottom:4px">② Braj Nidhi from ${fmtD(split[1].from)}${auto}</div>
+       <select class="a-sel" onchange="setField('${b.id}','transferRoomType',this.value)"><option value="">— select room —</option>${tOpts}</select>
+       <div class="a-row"><span class="a-lbl">Rooms</span>
+         <div class="stepper"><button onclick="stepTransfer('${b.id}',-1)">−</button><input type="number" min="0" value="${tp.rooms}" onchange="setField('${b.id}','transferRooms',this.value)"><button onclick="stepTransfer('${b.id}',1)">+</button></div></div>
+       <div class="a-meta">${tbeds} beds / ${b.count} ppl ${tbeds>=b.count?'✅':'⚠ short'}</div></div>`;
+  }
   const extraCtl=(selHotel&&selHotel.extraBedding)
     ? `<span class="a-lbl" style="margin-left:6px">Extra</span>
        <input class="a-num" type="number" min="0" value="${b.extraBeds||0}" title="extra beds" onchange="setField('${b.id}','extraBeds',this.value)">
@@ -945,7 +984,7 @@ function allocCell(b){
       <div class="a-row"><span class="a-lbl">Rooms</span>
         <div class="stepper"><button onclick="stepRooms('${b.id}',-1)">−</button><input type="number" min="0" value="${b.rooms||0}" onchange="setField('${b.id}','rooms',this.value)"><button onclick="stepRooms('${b.id}',1)">+</button></div>
         ${extraCtl}</div>
-      ${metaLine}${seva}</div>`;
+      ${metaLine}${transferCtl}${seva}</div>`;
 }
 function guestCell(b,withSug){
   const prefTxt=b.preferred&&b.preferred.length?b.preferred.map(hotelName).join(', '):'—';
@@ -1161,20 +1200,26 @@ function sevaLabel(b){
 function markEdited(b, note){ b.edited=true; b.editedAt=Date.now(); b.editedBy=USER.id; b.lastEditNote=note||'';
   notify('edit', (b.head?b.head+' — ':'')+(note||'request edited')+' — by '+USER.id, b.brahmachari||'', b.id); }
 function editedTag(b){ if(!b.edited) return ''; const who=b.editedBy?('by '+esc(b.editedBy)):'by guest'; const when=b.editedAt?(' on '+fmtDT(b.editedAt)):''; const what=b.lastEditNote?('<div class="rooms-mini" style="color:var(--saffron-dark)">↪ '+esc(b.lastEditNote)+'</div>'):''; return ' <span class="pill p-edited">✏️ edited '+who+when+'</span>'+what; }
-function fieldLabel(f){ return {hotel:'Guest house',roomType:'Room type',rooms:'Rooms',extraBeds:'Extra beds'}[f]||f; }
+function fieldLabel(f){ return {hotel:'Guest house',roomType:'Room type',rooms:'Rooms',extraBeds:'Extra beds',transferRoomType:'Braj Nidhi room',transferRooms:'Braj Nidhi rooms'}[f]||f; }
 function fieldVal(f,v){ return f==='hotel' ? (v?hotelName(v):'—') : ((v===''||v===undefined||v===null)?'—':v); }
 function setField(id,f,v){ const b=DB.bookings.find(x=>x.id===id); if(!b)return;
   const wasConfirmed=b.status==='confirmed';
-  const oldV = (f==='hotel') ? b.hotel : b[f];
-  if(f==='rooms'||f==='extraBeds') b[f]=Math.max(0,parseInt(v)||0); else b[f]=v;
-  b.roomPlan=null;   // manual edit overrides any multi-room auto plan
+  const isTransfer=(f==='transferRoomType'||f==='transferRooms');
+  const oldV = (f==='hotel') ? b.hotel : ((f==='transferRoomType'||f==='transferRooms') ? transferPlan(b)[f==='transferRoomType'?'type':'rooms'] : b[f]);
+  if(f==='rooms'||f==='extraBeds'||f==='transferRooms') b[f]=Math.max(0,parseInt(v)||0); else b[f]=v;
+  if(!isTransfer) b.roomPlan=null;   // manual edit overrides any multi-room auto plan (origin fields only)
   if(f==='hotel'){ b.roomType=''; b.rooms=0; b.extraBeds=0; }
   if(f==='roomType'){ const h=DB.hotels.find(x=>x.id===b.hotel); const r=h&&h.rooms.find(x=>x.type===v);
     if(r&&(!b.rooms||b.rooms<1)) b.rooms=Math.ceil(b.count/r.cap); }  // auto-fill rooms needed
-  const newV = (f==='hotel') ? b.hotel : b[f];
+  if(f==='transferRoomType'){ const r=brajRoomsList().find(x=>x.type===v); if(r) b.transferRooms=Math.max(1,Math.ceil((b.count||1)/r.cap)); }  // auto-fill Braj Nidhi rooms
+  const newV = (f==='hotel') ? b.hotel : ((f==='transferRoomType'||f==='transferRooms') ? transferPlan(b)[f==='transferRoomType'?'type':'rooms'] : b[f]);
   if(wasConfirmed && (isSuper()||isVcm()) && String(oldV)!==String(newV)) markEdited(b, fieldLabel(f)+': '+fieldVal(f,oldV)+' → '+fieldVal(f,newV));
   save();
-  if(f==='hotel'||f==='roomType'||f==='rooms'||f==='extraBeds') render(); }
+  if(['hotel','roomType','rooms','extraBeds','transferRoomType','transferRooms'].includes(f)) render(); }
+function stepTransfer(id,delta){ const b=DB.bookings.find(x=>x.id===id); if(!b)return;
+  const oldR=transferPlan(b).rooms; const nv=Math.max(0,oldR+delta); b.transferRooms=nv;
+  if(b.status==='confirmed' && (isSuper()||isVcm()) && oldR!==nv) markEdited(b,'Braj Nidhi rooms: '+oldR+' → '+nv);
+  save(); render(); }
 function approveNoReceipt(id){ if(!isSuper()){ toast('Only the Super Admin can confirm without a verified receipt'); return; } approve(id,true); }
 function approve(id,skipReceipt){ const b=DB.bookings.find(x=>x.id===id); if(!b)return;
   const h=DB.hotels.find(x=>x.id===b.hotel);
