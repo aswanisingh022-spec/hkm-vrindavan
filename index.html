@@ -767,7 +767,7 @@ function submitReq(){
     stays:stays, checkin:stays[0].checkin, checkout:stays[0].checkout,
     note:$('#reqNote').value.trim()};
   if(editingId){ const b=DB.bookings.find(x=>x.id===editingId);
-    if(b){ Object.assign(b,data); b.edited=true; b.editedAt=Date.now(); b.editedBy=USER.id; b.receiptWrong=false;
+    if(b){ Object.assign(b,data); b.edited=true; b.editedAt=Date.now(); b.editedBy=USER.id; b.lastEditNote='Devotee updated the request (now '+b.count+' '+(b.count===1?'person':'people')+', '+b.roomsRequested+' room(s))'; b.receiptWrong=false;
       notify('edit',`Edited request: ${b.head} (now ${b.count} ${b.count===1?'person':'people'}, ${b.roomsRequested} room(s)${b.extraRequested?`, ${b.extraRequested} extra bed`:''}) — review allocation`,USER.name,b.id); }
     editingId=null; save(); toast('Request updated ✓ — admin notified'); go('myreq'); return; }
   const b=Object.assign({id:uid('b'),brahmachari:USER.name,devId:USER.id,extraBeds:0,
@@ -842,7 +842,7 @@ function viewMyReq(){
          <button class="btn gray sm" onclick="guestCancel('${b.id}')">Cancel</button>
          <button class="btn red sm" onclick="guestWithdraw('${b.id}')">Pull back</button>`;
     return `<tr>
-    <td data-label="Guests">${headLabel(b)}${editedTag(b)}${b.receiptWrong?' <span class="pill p-rejected">⚠ receipt wrong — Edit &amp; give correct number</span>':''}<div class="muted">${peopleLabel(b)}${b.family?' · family':''}</div>${(b.edited && b.editedBy && b.editedBy!==USER.id)?`<div style="margin-top:5px;background:#fdf0dc;border:1px solid #f0d9b0;border-radius:8px;padding:5px 9px;font-size:12px;color:var(--amber)">🔔 Your request was updated by ${esc(b.editedBy)}${b.editedAt?(' on '+fmtDT(b.editedAt)):''}</div>`:''}</td>
+    <td data-label="Guests">${headLabel(b)}${editedTag(b)}${b.receiptWrong?' <span class="pill p-rejected">⚠ receipt wrong — Edit &amp; give correct number</span>':''}<div class="muted">${peopleLabel(b)}${b.family?' · family':''}</div>${(b.edited && b.editedBy && b.editedBy!==USER.id)?`<div style="margin-top:5px;background:#fdf0dc;border:1px solid #f0d9b0;border-radius:8px;padding:5px 9px;font-size:12px;color:var(--amber)">🔔 Your request was updated by ${esc(b.editedBy)}${b.editedAt?(' on '+fmtDT(b.editedAt)):''}${b.lastEditNote?`<div style="margin-top:2px;color:var(--saffron-dark)">↪ ${esc(b.lastEditNote)}</div>`:''}</div>`:''}</td>
     <td data-label="Dates">${stayLabel(b)||'<span class="muted">—</span>'}</td>
     <td data-label="Donation">${money(b.donation)}</td>
     <td data-label="Accommodation">${sevaLabel(b)}</td>
@@ -1134,9 +1134,9 @@ function viewBraj(){
     ${brajOccBlock}`;
 }
 function stepRooms(id,delta){ const b=DB.bookings.find(x=>x.id===id); if(!b)return;
-  const wasConfirmed=b.status==='confirmed';
+  const wasConfirmed=b.status==='confirmed'; const oldRooms=b.rooms||0;
   b.rooms=Math.max(0,(b.rooms||0)+delta); b.roomPlan=null;
-  if(wasConfirmed && (isSuper()||isVcm())) markEdited(b,'Rooms changed');
+  if(wasConfirmed && (isSuper()||isVcm()) && b.rooms!==oldRooms) markEdited(b,'Rooms: '+oldRooms+' → '+b.rooms);
   save(); render(); }
 function toggleSeva(id){ const b=DB.bookings.find(x=>x.id===id); if(!b)return; b.sevaCollected=!b.sevaCollected;
   if(b.sevaCollected){ if(!b.sevaChannel)b.sevaChannel='GuestHouse'; b.sevaDate=b.sevaDate||new Date().toISOString().slice(0,10); } save(); render(); }
@@ -1155,18 +1155,22 @@ function sevaLabel(b){
   if((b.guestType||'FR')!=='FR') return `<span class="pill p-confirmed">🎫 ${esc(b.guestType)}</span>`;   // PR / Media / Volunteer: no seva prompt
   if(b.donation>=DB.rules.freeMin) return '<span class="pill p-confirmed">🙏 Free stay</span>';
   return b.sevaCollected ? '<span class="pill p-confirmed">✅ Seva received</span>' : '<span class="pill p-pending">💰 Seva to be paid</span>'; }
-/* Record that a booking was edited: who (login id) + when. Notifies admin/VCM; the devotee sees it on My Requests. */
-function markEdited(b, note){ b.edited=true; b.editedAt=Date.now(); b.editedBy=USER.id;
-  notify('edit', (note||('Booked request edited: '+b.head))+' — by '+USER.id, b.brahmachari||'', b.id); }
-function editedTag(b){ if(!b.edited) return ''; const who=b.editedBy?('by '+esc(b.editedBy)):'by guest'; const when=b.editedAt?(' on '+fmtDT(b.editedAt)):''; return ' <span class="pill p-edited">✏️ edited '+who+when+'</span>'; }
+/* Record that a booking was edited: who (login id) + when + WHAT changed. Notifies admin/VCM; devotee sees it on My Requests. */
+function markEdited(b, note){ b.edited=true; b.editedAt=Date.now(); b.editedBy=USER.id; b.lastEditNote=note||'';
+  notify('edit', (b.head?b.head+' — ':'')+(note||'request edited')+' — by '+USER.id, b.brahmachari||'', b.id); }
+function editedTag(b){ if(!b.edited) return ''; const who=b.editedBy?('by '+esc(b.editedBy)):'by guest'; const when=b.editedAt?(' on '+fmtDT(b.editedAt)):''; const what=b.lastEditNote?('<div class="rooms-mini" style="color:var(--saffron-dark)">↪ '+esc(b.lastEditNote)+'</div>'):''; return ' <span class="pill p-edited">✏️ edited '+who+when+'</span>'+what; }
+function fieldLabel(f){ return {hotel:'Guest house',roomType:'Room type',rooms:'Rooms',extraBeds:'Extra beds'}[f]||f; }
+function fieldVal(f,v){ return f==='hotel' ? (v?hotelName(v):'—') : ((v===''||v===undefined||v===null)?'—':v); }
 function setField(id,f,v){ const b=DB.bookings.find(x=>x.id===id); if(!b)return;
   const wasConfirmed=b.status==='confirmed';
+  const oldV = (f==='hotel') ? b.hotel : b[f];
   if(f==='rooms'||f==='extraBeds') b[f]=Math.max(0,parseInt(v)||0); else b[f]=v;
   b.roomPlan=null;   // manual edit overrides any multi-room auto plan
   if(f==='hotel'){ b.roomType=''; b.rooms=0; b.extraBeds=0; }
   if(f==='roomType'){ const h=DB.hotels.find(x=>x.id===b.hotel); const r=h&&h.rooms.find(x=>x.type===v);
     if(r&&(!b.rooms||b.rooms<1)) b.rooms=Math.ceil(b.count/r.cap); }  // auto-fill rooms needed
-  if(wasConfirmed && (isSuper()||isVcm())) markEdited(b, 'Booked request updated ('+f+')');
+  const newV = (f==='hotel') ? b.hotel : b[f];
+  if(wasConfirmed && (isSuper()||isVcm()) && String(oldV)!==String(newV)) markEdited(b, fieldLabel(f)+': '+fieldVal(f,oldV)+' → '+fieldVal(f,newV));
   save();
   if(f==='hotel'||f==='roomType'||f==='rooms'||f==='extraBeds') render(); }
 function approveNoReceipt(id){ if(!isSuper()){ toast('Only the Super Admin can confirm without a verified receipt'); return; } approve(id,true); }
