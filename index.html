@@ -1155,7 +1155,9 @@ function approve(id,skipReceipt){ const b=DB.bookings.find(x=>x.id===id); if(!b)
   const avail=(roomObj?roomObj.count:0)-roomsAssignedByType(h.id,b.roomType,id);
   if(b.rooms>avail){ toast('Only '+avail+' '+b.roomType+' room(s) free at '+h.name+' — reduce rooms'); return; }
   if((b.extraBeds||0)>0 && !h.extraBedding){ toast(h.name+' does not allow extra bedding — set extra beds to 0'); return; }
-  if(needsReceipt && !skipReceipt && b.donation<DB.rules.freeMin && !b.sevaCollected && !b.sevaOnArrival){ toast('Please record the accommodation seva (mark Paid or “pay on arrival”) before confirming'); return; }
+  // "Devotee will collect" needs no seva confirmation — auto-record the devotee as the collector and allow booking
+  if(needsReceipt && b.donation<DB.rules.freeMin && b.sevaPlan==='devotee' && !b.sevaCollected){ b.sevaCollected=true; b.sevaChannel='Devotee'; b.sevaOnArrival=false; b.sevaDate=b.sevaDate||new Date().toISOString().slice(0,10); }
+  if(needsReceipt && !skipReceipt && b.donation<DB.rules.freeMin && b.sevaPlan!=='devotee' && !b.sevaCollected && !b.sevaOnArrival){ toast('Please record the accommodation seva (mark Paid or “pay on arrival”) before confirming'); return; }
   b.status='confirmed'; save(); render();
   const extraMsg=(b.extraBeds||0)>0?` + ${b.extraBeds} extra bed`:'';
   const cts=hotelSendContacts(h.id);
@@ -1516,8 +1518,14 @@ function viewReport(){
 /* ---------------- Payments / Seva collected panel ---------------- */
 function sevaChannelLabel(b){ const v=b.sevaChannel; return v==='GPP'?"GPP's Team":v==='GuestHouse'?'Guest House Team':v==='Staff'?'Staff':v==='Devotee'?('Devotee — '+esc(b.brahmachari)):'—'; }
 /* Bookings that still need an accommodation seva collected (FR, below the free threshold, not settled) */
-function needsSeva(b){ return (b.guestType||'FR')==='FR' && (b.donation||0)<DB.rules.freeMin && !b.sevaCollected && !b.sevaOnArrival && b.status!=='cancelled' && b.status!=='withdrawn'; }
+function isLowAmount(b){ return (b.guestType||'FR')==='FR' && (b.donation||0)<DB.rules.freeMin && b.status!=='cancelled' && b.status!=='withdrawn'; }
+function needsSeva(b){ return isLowAmount(b) && !b.sevaCollected && !b.sevaOnArrival; }        // still to settle (any plan)
+function needsStaffSeva(b){ return needsSeva(b) && b.sevaPlan==='staff'; }                     // Staff must collect this one
 function sevaPlanLabel(b){ return b.sevaPlan==='staff' ? '🧑‍🔧 Staff to collect' : '🙋 Devotee will collect'; }
+function sevaStatus(b){ if(b.sevaCollected) return '<span class="pill p-confirmed">✅ Received by '+esc(sevaChannelLabel(b))+'</span>';
+  if(b.sevaPlan==='devotee') return '<span class="pill p-waitlist">🙋 Devotee will collect</span>';
+  if(b.sevaOnArrival) return '<span class="pill p-waitlist">🕓 Pay on arrival</span>';
+  return '<span class="pill p-pending">💰 Seva pending</span>'; }
 /* Record seva payment — works for Staff, VCM and Super Admin (targeted cloud write) */
 async function markSeva(id,mode){ const b=DB.bookings.find(x=>x.id===id); if(!b)return;
   if(mode==='paid'){ b.sevaCollected=true; b.sevaOnArrival=false; b.sevaDate=new Date().toISOString().slice(0,10); if(!b.sevaChannel||b.sevaChannel==='') b.sevaChannel = isVcm()?'GuestHouse':isSuper()?'GPP':'Staff'; }
@@ -1546,29 +1554,34 @@ function viewCollections(){
 }
 /* ---------------- Seva to collect (Staff, VCM, Super Admin) ---------------- */
 function viewSevaCollect(){
-  const pending=DB.bookings.filter(needsSeva);
-  const onArrival=DB.bookings.filter(b=>b.sevaOnArrival && !b.sevaCollected && b.status!=='cancelled' && b.status!=='withdrawn');
+  const staff = USER.role==='staff';
   const amt=b=>seeMoney()?money(b.donation):catBadge(b);
-  const row=b=>`<tr data-search="${esc(((b.head||'')+' '+(b.phone||'')).toLowerCase())}">
-    <td data-label="Guest"><b>${esc(headLabel(b))}</b><div class="muted">by ${esc(b.brahmachari)} · ${esc(peopleLabel(b))}</div></td>
+  const acts=b=>{
+    if(b.sevaCollected) return `<button class="btn gray sm" onclick="markSeva('${b.id}','undo')">Undo</button>`;
+    if(b.sevaPlan==='devotee') return `<span class="muted">No action — devotee collects</span>`;
+    return `<button class="btn green sm" onclick="markSeva('${b.id}','paid')">✅ Mark paid</button><button class="btn sm" onclick="markSeva('${b.id}','arrival')">🕓 Pay on arrival</button>`;
+  };
+  // Staff sees ONLY the ones they must collect; devotee-collect ones are hidden (nothing for staff to do).
+  // VCM & Super Admin see EVERY low-donation FR booking, with who booked it and who collects/collected.
+  const list = staff ? DB.bookings.filter(needsStaffSeva) : DB.bookings.filter(isLowAmount);
+  const cols = staff ? ['Guest / Family','Booked by','Donation','Who collects','Dates','Action']
+                     : ['Guest / Family','Booked by (Devotee)','Donation','Who collects','Payment / collected by','Dates','Action'];
+  const row=b=>`<tr data-search="${esc(((b.head||'')+' '+(b.phone||'')+' '+(b.brahmachari||'')).toLowerCase())}">
+    <td data-label="Guest"><b>${esc(headLabel(b))}</b><div class="muted">${esc(peopleLabel(b))}</div></td>
+    <td data-label="Booked by">${esc(b.brahmachari||'—')}</td>
     <td data-label="Donation">${amt(b)}</td>
     <td data-label="Who collects">${sevaPlanLabel(b)}</td>
+    ${staff?'':`<td data-label="Payment / collected by">${sevaStatus(b)}</td>`}
     <td data-label="Dates">${esc(stayLabel(b)||'—')}</td>
-    <td data-label="Action"><div class="row-actions"><button class="btn green sm" onclick="markSeva('${b.id}','paid')">✅ Mark paid</button><button class="btn sm" onclick="markSeva('${b.id}','arrival')">🕓 Pay on arrival</button></div></td></tr>`;
-  const arrRow=b=>`<tr data-search="${esc(((b.head||'')+' '+(b.phone||'')).toLowerCase())}">
-    <td data-label="Guest"><b>${esc(headLabel(b))}</b><div class="muted">by ${esc(b.brahmachari)} · ${esc(peopleLabel(b))}</div></td>
-    <td data-label="Donation">${amt(b)}</td>
-    <td data-label="Status"><span class="pill p-waitlist">🕓 Pay on arrival</span></td>
-    <td data-label="Dates">${esc(stayLabel(b)||'—')}</td>
-    <td data-label="Action"><div class="row-actions"><button class="btn green sm" onclick="markSeva('${b.id}','paid')">✅ Mark paid</button><button class="btn gray sm" onclick="markSeva('${b.id}','undo')">Undo</button></div></td></tr>`;
-  return `<div class="card"><h2 class="section">💰 Seva to collect <span class="pill p-pending">${pending.length}</span></h2>
-    <p class="subhead">Guests with a donation below ₹50,000 whose accommodation seva still needs collecting. Press <b>Mark paid</b> once collected, or <b>Pay on arrival</b>. It updates for Staff, VCM Guest House and Super Admin, and lets the room be confirmed.</p>
-    <input placeholder="🔍 Search by guest name or number" value="${esc(searchQ['sevaRows']||'')}" oninput="setSearch('sevaRows',this.value)" style="margin-bottom:10px;max-width:360px">
-    <div class="scrollx"><table class="stack-mobile"><thead><tr><th>Guest / Family</th><th>Donation</th><th>Who collects</th><th>Dates</th><th>Action</th></tr></thead>
-      <tbody id="sevaRows">${pending.map(row).join('')||'<tr><td colspan="5" class="muted">Nothing pending — all seva collected 🎉</td></tr>'}</tbody></table></div>
-    ${onArrival.length?`<h2 class="section" style="margin-top:16px">🕓 Pay on arrival <span class="pill p-waitlist">${onArrival.length}</span></h2>
-    <div class="scrollx"><table class="stack-mobile"><thead><tr><th>Guest / Family</th><th>Donation</th><th>Status</th><th>Dates</th><th>Action</th></tr></thead>
-      <tbody>${onArrival.map(arrRow).join('')}</tbody></table></div>`:''}</div>`;
+    <td data-label="Action"><div class="row-actions">${acts(b)}</div></td></tr>`;
+  const pendingCount = (staff?list:DB.bookings.filter(needsSeva)).length;
+  return `<div class="card"><h2 class="section">💰 Seva to collect <span class="pill p-pending">${pendingCount} pending</span></h2>
+    <p class="subhead">${staff
+      ? 'Guests whose seva <b>Staff must collect</b> (donation below ₹50,000). Devotee‑collected ones are handled by the devotee and are not shown here. Mark <b>Paid</b> or <b>Pay on arrival</b> once done — it updates for VCM and Super Admin.'
+      : 'Every low‑donation (below ₹50,000) FR guest booked, showing <b>who booked</b> them and <b>who collects / collected</b> the seva. “Devotee will collect” needs no action — VCM can confirm the room directly.'}</p>
+    <input placeholder="🔍 Search guest, number or devotee" value="${esc(searchQ['sevaRows']||'')}" oninput="setSearch('sevaRows',this.value)" style="margin-bottom:10px;max-width:380px">
+    <div class="scrollx"><table class="stack-mobile"><thead><tr>${cols.map(c=>'<th>'+c+'</th>').join('')}</tr></thead>
+      <tbody id="sevaRows">${list.map(row).join('')||('<tr><td colspan="'+cols.length+'" class="muted">Nothing here 🎉</td></tr>')}</tbody></table></div></div>`;
 }
 /* ---------------- Super Admin: Settings (rules) ---------------- */
 function setRule(f,v){ DB.rules[f]=Math.max(0,parseInt(v)||0); syncHotelMinFromRules(); const c=recalcPending(); save(); render();
