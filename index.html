@@ -1556,6 +1556,9 @@ function sevaStatus(b){ if(!staffCollects(b)) return '<span class="pill p-waitli
   if(b.sevaOnHold) return '<span class="pill p-waitlist">⏸ On hold</span>';
   return '<span class="pill p-pending">💰 Unpaid</span>'; }
 /* Record seva payment — works for Staff, VCM and Super Admin (targeted cloud write) */
+async function saveSevaNote(id,text){ const b=DB.bookings.find(x=>x.id===id); if(!b)return; b.sevaNote=(text||'').trim();
+  try{ const {error}=await sb.from('bookings').update({data:bookingData(b),dev_id:b.devId||null}).eq('id',b.id);
+    if(error){ console.warn('note save',error); toast('⚠ Could not save note — check connection'); } else toast('Status note saved'); }catch(e){ console.warn(e); } }
 async function markSeva(id,mode){ const b=DB.bookings.find(x=>x.id===id); if(!b)return;
   if(mode==='paid'){ b.sevaCollected=true; b.sevaOnHold=false; b.sevaDate=new Date().toISOString().slice(0,10); b.sevaChannel = isVcm()?'GuestHouse':'GPP'; }   // Staff = GPP's Team
   else if(mode==='hold'){ b.sevaOnHold=true; b.sevaCollected=false; }
@@ -1596,13 +1599,14 @@ function viewSevaCollect(){
   const cols = staff ? ['Guest / Family','Booked by','Donation','Who collects','Dates','Action']
                      : ['Guest / Family','Booked by (Devotee)','Donation','Who collects','Payment / collected by','Dates','Action'];
   const row=b=>`<tr data-search="${esc(((b.head||'')+' '+(b.phone||'')+' '+(b.brahmachari||'')).toLowerCase())}">
-    <td data-label="Guest"><b>${esc(headLabel(b))}</b><div class="muted">${esc(peopleLabel(b))}</div></td>
+    <td data-label="Guest"><b>${esc(headLabel(b))}</b><div class="muted">${esc(peopleLabel(b))}</div>${b.phone?`<div style="margin-top:2px"><a href="tel:${esc(b.phone)}" style="color:var(--saffron-dark);font-weight:600;text-decoration:none">📞 ${esc(b.phone)}</a></div>`:'<div class="muted">📞 no number</div>'}</td>
     <td data-label="Booked by">${esc(b.brahmachari||'—')}</td>
     <td data-label="Donation">${amt(b)}</td>
     <td data-label="Who collects">${sevaPlanLabel(b)}</td>
     ${staff?'':`<td data-label="Payment / collected by">${sevaStatus(b)}</td>`}
     <td data-label="Dates">${esc(stayLabel(b)||'—')}</td>
-    <td data-label="Action"><div class="row-actions">${acts(b)}</div></td></tr>`;
+    <td data-label="Action"><div class="row-actions">${acts(b)}</div>
+      <div style="margin-top:6px"><input type="text" value="${esc(b.sevaNote||'')}" placeholder="✍ status note (e.g. not answering, will pay 5 Sept)" style="width:100%;min-width:170px;font-size:12px" onchange="saveSevaNote('${b.id}',this.value)"></div></td></tr>`;
   const pendingCount = DB.bookings.filter(needsStaffSeva).length;
   return `<div class="card"><h2 class="section">💰 Seva to collect <span class="pill p-pending">${pendingCount} pending</span></h2>
     ${staff ? '' : '<p class="subhead">Every low‑donation (below ₹50,000) FR guest booked, showing <b>who booked</b> them and <b>who collects / collected</b> the seva. “Devotee will collect” needs no action — VCM can confirm the room directly.</p>'}
