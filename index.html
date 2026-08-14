@@ -1254,7 +1254,15 @@ function editHotel(id,f,v){ const h=DB.hotels.find(x=>x.id===id); if(!h)return; 
 function toggleExtra(id){ const h=DB.hotels.find(x=>x.id===id); h.extraBedding=!h.extraBedding; save(); render(); }
 function editHotelText(id,f,v){ const h=DB.hotels.find(x=>x.id===id); if(!h)return; h[f]=v; save(); render(); }
 function toggleHotel(id){ const h=DB.hotels.find(x=>x.id===id); h.active=!h.active; recalcPending(); save(); render(); }
-function delHotel(id){ DB.hotels=DB.hotels.filter(x=>x.id!==id); recalcPending(); save(); render(); toast('Hotel removed'); }
+/* Log a hotel/room change to the shared log book + notify Super Admin and other VCM members */
+function roomLog(action, hname, detail){
+  const who = isVcm()?('VCM '+USER.id) : isSuper()?('Super Admin '+USER.id) : USER.id;
+  notify('log', who+' '+action+' '+esc(hname)+(detail?(' — '+detail):''), USER.name, '');
+}
+function delHotel(id){ const h=DB.hotels.find(x=>x.id===id); if(!h)return;
+  const reason=prompt('Remove the hotel "'+h.name+'"?\nThis deletes the hotel and clears its allocations.\n\nType a reason to confirm (required):');
+  if(reason===null || !reason.trim()){ toast('Cancelled — a reason is required to delete'); return; }
+  DB.hotels=DB.hotels.filter(x=>x.id!==id); recalcPending(); roomLog('deleted hotel', h.name, 'reason: '+reason.trim()); save(); render(); toast('Hotel removed — logged'); }
 function addRoom(id){ const h=DB.hotels.find(x=>x.id===id);
   const t=$('#rt-'+id).value.trim(), c=parseInt($('#rc-'+id).value)||1, n=parseInt($('#rn-'+id).value)||1;
   if(!t){toast('Enter room type');return;} h.rooms.push({type:t,cap:c,count:n}); save(); render(); }
@@ -1262,12 +1270,17 @@ let editRoomKey=null;
 function startEditRoom(id,i){ editRoomKey=id+'_'+i; render(); }
 function cancelEditRoom(){ editRoomKey=null; render(); }
 function saveRoom(id,i){ const h=DB.hotels.find(x=>x.id===id); const r=h&&h.rooms[i]; if(!r)return;
-  const key=id+'_'+i;
+  const key=id+'_'+i; const oldCount=r.count, oldType=r.type;
   const t=$('#er-type-'+key).value.trim();
   const c=Math.max(1,parseInt($('#er-cap-'+key).value)||1);
   const n=Math.max(0,parseInt($('#er-count-'+key).value)||0);
-  if(t) r.type=t; r.cap=c; r.count=n; editRoomKey=null; save(); render(); toast('Room updated'); }
-function delRoom(id,i){ const h=DB.hotels.find(x=>x.id===id); h.rooms.splice(i,1); save(); render(); }
+  if(t) r.type=t; r.cap=c; r.count=n; editRoomKey=null;
+  if(n!==oldCount) roomLog('changed room quantity ('+oldType+') in', h.name, oldCount+' → '+n+' rooms');
+  save(); render(); toast('Room updated'+(n!==oldCount?' — logged':'')); }
+function delRoom(id,i){ const h=DB.hotels.find(x=>x.id===id); const r=h&&h.rooms[i]; if(!r)return;
+  const reason=prompt('Remove the room type "'+r.type+'" ('+r.count+' rooms) from '+h.name+'?\n\nType a reason to confirm (required):');
+  if(reason===null || !reason.trim()){ toast('Cancelled — a reason is required to remove a room'); return; }
+  h.rooms.splice(i,1); roomLog('removed room "'+r.type+'" from', h.name, 'reason: '+reason.trim()); save(); render(); toast('Room removed — logged'); }
 function addContact(id){ const h=DB.hotels.find(x=>x.id===id); if(!h.contacts)h.contacts=[];
   const n=$('#cn-'+id).value.trim(), p=$('#cp-'+id).value.trim();
   if(!n||!p){ toast('Enter both name and phone'); return; }
@@ -1353,7 +1366,7 @@ function viewExports(){
 
 /* ---------------- Admin: Notifications ---------------- */
 let notifFilter='unread';
-function notifIcon(k){ return {new:'🆕',edit:'✏️',cancel:'🚫',withdraw:'↩️',reopen:'🔄'}[k]||'🔔'; }
+function notifIcon(k){ return {new:'🆕',edit:'✏️',cancel:'🚫',withdraw:'↩️',reopen:'🔄',log:'🛠️',seva:'💰'}[k]||'🔔'; }
 function fmtDT(ts){ return new Date(ts).toLocaleString('en-IN',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}); }
 function setNotifFilter(f){ notifFilter=f; render(); }
 function ackNotif(id){ const n=DB.notifications.find(x=>x.id===id); if(n){ n.ack=true; save(); render(); toast('Acknowledged'); } }
