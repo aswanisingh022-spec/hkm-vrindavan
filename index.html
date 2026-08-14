@@ -1548,10 +1548,11 @@ function viewReport(){
 function sevaChannelLabel(b){ const v=b.sevaChannel; return v==='GPP'?"GPP's Team":v==='GuestHouse'?'Guest House Team':v==='Staff'?'Staff':v==='Devotee'?('Devotee — '+esc(b.brahmachari)):'—'; }
 /* Bookings that still need an accommodation seva collected (FR, below the free threshold, not settled) */
 function isLowAmount(b){ return (b.guestType||'FR')==='FR' && !isFreeStay(b) && b.status!=='cancelled' && b.status!=='withdrawn'; }
-function needsStaffSeva(b){ return isLowAmount(b) && b.sevaPlan==='staff' && !b.sevaCollected; }   // Staff (GPP's Team) still to collect — unpaid or on hold
-function sevaPlanLabel(b){ return b.sevaPlan==='staff' ? "🧑‍🔧 GPP's Team / Staff to collect" : '🙋 Devotee will collect'; }
-function sevaStatus(b){ if(b.sevaCollected) return '<span class="pill p-confirmed">✅ Paid — '+esc(sevaChannelLabel(b))+'</span>';
-  if(b.sevaPlan==='devotee') return '<span class="pill p-waitlist">🙋 Will be collected by devotee</span>';
+function staffCollects(b){ return b.sevaPlan==='staff'; }                                       // otherwise the devotee collects
+function needsStaffSeva(b){ return isLowAmount(b) && staffCollects(b) && !b.sevaCollected; }      // GPP's Team still to collect — unpaid or on hold
+function sevaPlanLabel(b){ return staffCollects(b) ? "🧑‍🔧 GPP's Team will collect" : '🙋 Devotee will collect'; }
+function sevaStatus(b){ if(!staffCollects(b)) return '<span class="pill p-waitlist">🙋 Will be collected by devotee</span>';
+  if(b.sevaCollected) return '<span class="pill p-confirmed">✅ Paid — collected by '+esc(sevaChannelLabel(b))+'</span>';
   if(b.sevaOnHold) return '<span class="pill p-waitlist">⏸ On hold</span>';
   return '<span class="pill p-pending">💰 Unpaid</span>'; }
 /* Record seva payment — works for Staff, VCM and Super Admin (targeted cloud write) */
@@ -1585,7 +1586,7 @@ function viewSevaCollect(){
   const staff = USER.role==='staff';
   const amt=b=>seeMoney()?money(b.donation):catBadge(b);
   const acts=b=>{
-    if(b.sevaPlan==='devotee') return `<span class="muted">No action — collected by devotee</span>`;
+    if(!staffCollects(b)) return `<span class="muted">No action — devotee collects</span>`;
     if(b.sevaCollected) return `<button class="btn gray sm" onclick="markSeva('${b.id}','unpaid')">Mark unpaid</button>`;
     return `<button class="btn green sm" onclick="markSeva('${b.id}','paid')">✅ Paid</button><button class="btn sm" onclick="markSeva('${b.id}','hold')">⏸ On hold</button>${b.sevaOnHold?`<button class="btn gray sm" onclick="markSeva('${b.id}','unpaid')">Unpaid</button>`:''}`;
   };
