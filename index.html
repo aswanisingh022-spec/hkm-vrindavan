@@ -391,7 +391,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-15-b46';
+const APP_BUILD='2026-08-15-b47';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -1804,8 +1804,7 @@ function needsStaffSeva(b){ return isLowAmount(b) && staffCollects(b) && !b.seva
 function sevaPlanLabel(b){ return staffCollects(b) ? "🧑‍🔧 GPP's Team will collect" : '🙋 Devotee will collect'; }
 function sevaStatus(b){ if(!staffCollects(b)) return '<span class="pill p-waitlist">🙋 Will be collected by devotee</span>';
   if(b.sevaCollected) return '<span class="pill p-confirmed">✅ Paid — collected by '+esc(sevaChannelLabel(b))+'</span>';
-  if(b.sevaOnHold) return '<span class="pill p-waitlist">⏸ On hold</span>';
-  return '<span class="pill p-pending">💰 Unpaid</span>'; }
+  return '<span class="pill p-pending">💰 Payment due</span>'; }
 /* Record seva payment — works for Staff, VCM and Super Admin (targeted cloud write) */
 async function saveSevaNote(id,text){ const b=DB.bookings.find(x=>x.id===id); if(!b)return; b.sevaNote=(text||'').trim();
   try{ const {error}=await sb.from('bookings').update({data:bookingData(b),dev_id:b.devId||null}).eq('id',b.id);
@@ -1842,7 +1841,7 @@ function viewSevaCollect(){
   const acts=b=>{
     if(!staffCollects(b)) return `<span class="muted">No action — devotee collects</span>`;
     if(b.sevaCollected) return `<button class="btn gray sm" onclick="markSeva('${b.id}','unpaid')">Mark unpaid</button>`;
-    return `<button class="btn green sm" onclick="markSeva('${b.id}','paid')">✅ Paid</button><button class="btn sm" onclick="markSeva('${b.id}','hold')">⏸ On hold</button>${b.sevaOnHold?`<button class="btn gray sm" onclick="markSeva('${b.id}','unpaid')">Unpaid</button>`:''}`;
+    return `<button class="btn green sm" onclick="markSeva('${b.id}','paid')">✅ Paid</button>`;
   };
   // Staff sees ONLY the ones they (GPP's Team) must collect; devotee-collect ones are hidden (nothing for staff to do).
   // VCM & Super Admin see EVERY low-donation FR booking, with who booked it and who collects/collected.
