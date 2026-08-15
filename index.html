@@ -530,8 +530,24 @@ function roomsUsedOnDate(hid,type,d){ if(!d) return peakRoomsUsed(hid,type);
       && (b.checkin||DB.rules.eventStart)<=d && d<(b.checkout||DB.rules.eventEnd))
     .reduce((s,b)=> s + bookingRooms(b).filter(rp=>rp.type===type).reduce((a,rp)=>a+rp.rooms,0), 0); }
 function nextDay(d){ const x=new Date(d+'T00:00'); if(isNaN(x)) return d; x.setDate(x.getDate()+1); return x.toISOString().slice(0,10); }
+function prevDay(d){ const x=new Date(d+'T00:00'); if(isNaN(x)) return d; x.setDate(x.getDate()-1); return x.toISOString().slice(0,10); }
+function nightsBetween(from,to){ const a=new Date(from+'T00:00'), b=new Date(to+'T00:00'); if(isNaN(a)||isNaN(b)) return 1; return Math.max(1, Math.round((b-a)/86400000)+1); }
+/* Peak rooms of a type used at any single night WITHIN [from..to] (date-aware, clipped to the window). */
+function peakRoomsUsedRange(hid,type,from,to){ const wStart=from, wEnd=nextDay(to); const segs=[];
+  DB.bookings.filter(b=>b.hotel===hid&&b.status==='confirmed').forEach(b=>{
+    const rms=bookingRooms(b).filter(rp=>rp.type===type).reduce((a,rp)=>a+rp.rooms,0); if(rms<=0) return;
+    const ci=b.checkin||DB.rules.eventStart, co=b.checkout||DB.rules.eventEnd;
+    const s=ci>wStart?ci:wStart, e=co<wEnd?co:wEnd; if(s<e) segs.push([s,e,rms]); });
+  if(!segs.length) return 0;
+  const ev=[]; segs.forEach(([s,e,r])=>{ ev.push([s,r]); ev.push([e,-r]); });
+  ev.sort((a,b)=> a[0]<b[0]?-1 : a[0]>b[0]?1 : (a[1]-b[1]));
+  let cur=0,pk=0; ev.forEach(x=>{ cur+=x[1]; if(cur>pk)pk=cur; }); return pk; }
 let availDate=null;
 function setAvailDate(v){ availDate=v; render(); }
+let dashFrom=null, dashTo=null;
+function setDashFrom(v){ dashFrom=v; if(dashTo && dashTo<v) dashTo=v; render(); }
+function setDashTo(v){ dashTo=v; if(dashFrom && v<dashFrom) dashFrom=v; render(); }
+function resetDashRange(){ dashFrom=DB.rules.eventStart; dashTo=prevDay(DB.rules.eventEnd); render(); }
 /* Greedy pack a group of `need` people into a hotel's free rooms (largest rooms first). Returns a
    roomPlan [{type,rooms}] only if the WHOLE group fits (one-group-one-hotel), else null. excludeId frees that booking's rooms. */
 function packGroup(hid,need,excludeId){
@@ -983,16 +999,31 @@ function viewDash(){
   const hotels=DB.hotels, bk=DB.bookings;
   const totCap=hotels.reduce((s,h)=>s+hotelCapacity(h),0);
   const totRooms=hotels.reduce((s,h)=>s+hotelRoomsTotal(h),0);
-  const roomsBooked=bk.filter(b=>b.status==='confirmed').reduce((s,b)=>s+(b.rooms||0),0);
-  const pending=bk.filter(b=>b.status==='pending').length;
-  const confirmed=bk.filter(b=>b.status==='confirmed').length;
-  const waitlist=bk.filter(b=>b.status==='waitlist').length;
+  // Date range the dashboard reports on (single night when From = To). Defaults to the whole festival.
+  const dFrom = dashFrom || DB.rules.eventStart;
+  const dTo   = dashTo   || prevDay(DB.rules.eventEnd);
+  const single = dFrom===dTo;
+  const overlapsRange=b=> datesOverlap(dFrom, nextDay(dTo), (b.checkin||DB.rules.eventStart), (b.checkout||DB.rules.eventEnd));
+  // Rooms occupied at the busiest night within the range (per hotel/room-type pool, then summed).
+  const roomsBooked=hotels.reduce((s,h)=>s+h.rooms.reduce((a,r)=>a+peakRoomsUsedRange(h.id,r.type,dFrom,dTo),0),0);
+  const pending=bk.filter(b=>b.status==='pending' && overlapsRange(b)).length;
+  const confirmed=bk.filter(b=>b.status==='confirmed' && overlapsRange(b)).length;
+  const waitlist=bk.filter(b=>b.status==='waitlist' && overlapsRange(b)).length;
   const totDon=bk.reduce((s,b)=>s+(b.donation||0),0);
   const verifDon=bk.filter(b=>b.receipt).reduce((s,b)=>s+(b.donation||0),0);
   const stats=[['Hotels',hotels.filter(h=>h.active).length],['Total Rooms',totRooms],['Total Capacity',totCap+' beds'],
     ['Rooms Booked',roomsBooked],['Rooms Available',totRooms-roomsBooked],['Pending Requests',pending],
     ['Confirmed',confirmed],['Waitlisted',waitlist]];
   const statCards=stats.map(([l,n])=>`<div class="stat"><div class="n">${n}</div><div class="l">${l}</div></div>`).join('');
+  const lastNight=prevDay(DB.rules.eventEnd);
+  const rangeSel=`<div class="flex" style="margin:2px 0 4px;gap:10px;align-items:center;flex-wrap:wrap">
+      <label style="font-weight:700">📅 Show for</label>
+      <input type="date" value="${dFrom}" min="${DB.rules.eventStart}" max="${lastNight}" onchange="setDashFrom(this.value)" style="max-width:165px" title="From night">
+      <span style="font-weight:600">→</span>
+      <input type="date" value="${dTo}" min="${dFrom}" max="${lastNight}" onchange="setDashTo(this.value)" style="max-width:165px" title="To night">
+      <span class="pill p-confirmed">${single?('1 night · '+fmtD(dFrom)):(nightsBetween(dFrom,dTo)+' nights · '+fmtD(dFrom)+' → '+fmtD(nextDay(dTo)))}</span>
+      <button class="btn gray sm" onclick="resetDashRange()">Whole festival</button></div>
+    <p class="subhead" style="margin-top:2px">Rooms Booked / Available and the table below reflect the busiest night in the chosen dates. Set both dates the same for a single night.</p>`;
   const occ=hotels.map(h=>{ const gb=guestsBookedInHotel(h.id),cap=hotelCapacity(h);
     const pct=cap?Math.round(gb/cap*100):0;
     return `<tr><td>${esc(h.name)}${h.active?'':' <span class="muted">(inactive)</span>'}</td>
@@ -1007,19 +1038,16 @@ function viewDash(){
         </div>
         <p class="muted" style="margin-top:14px">${bk.filter(b=>b.receipt).length} of ${bk.length} bookings have a receipt uploaded.</p>
       </div>`;
-  const availDay = availDate || DB.rules.eventStart;   // which night's availability to show
   const availRows=hotelsByPriority().filter(h=>h.active).map(h=>{
-    const freeRooms=h.rooms.reduce((s,r)=>s+Math.max(0,r.count-roomsUsedOnDate(h.id,r.type,availDay)),0);
-    const byType=h.rooms.map(r=>{const f=Math.max(0,r.count-roomsUsedOnDate(h.id,r.type,availDay)); return `${esc(r.type)} ${f}`;}).join(' · ');
+    const freeRooms=h.rooms.reduce((s,r)=>s+Math.max(0,r.count-peakRoomsUsedRange(h.id,r.type,dFrom,dTo)),0);
+    const byType=h.rooms.map(r=>{const f=Math.max(0,r.count-peakRoomsUsedRange(h.id,r.type,dFrom,dTo)); return `${esc(r.type)} ${f}`;}).join(' · ');
     return `<tr><td><b>${esc(h.name)}</b><div class="muted">${byType} free</div></td>
       <td><b style="color:${freeRooms>0?'var(--green)':'var(--red)'}">${freeRooms}</b> <span class="muted">/ ${hotelRoomsTotal(h)}</span></td></tr>`; }).join('');
   const availCard=`<div class="card"><h2 class="section">🛏️ Rooms available by guest house</h2>
-    <p class="subhead">Rooms free on the night of the selected date. Change the date to see availability for any day of the festival.</p>
-    <div class="flex" style="margin-bottom:12px;gap:10px;align-items:center;flex-wrap:wrap"><label style="font-weight:600">📅 Night of</label>
-      <input type="date" value="${availDay}" min="${DB.rules.eventStart}" max="${DB.rules.eventEnd}" onchange="setAvailDate(this.value)" style="max-width:180px">
-      <span class="muted">${fmtD(availDay)} → ${fmtD(nextDay(availDay))}</span></div>
+    <p class="subhead">Rooms free for the dates selected above (${single?fmtD(dFrom):(fmtD(dFrom)+' → '+fmtD(nextDay(dTo)))}).</p>
     <table><thead><tr><th>Guest house</th><th>Rooms free</th></tr></thead><tbody>${availRows}</tbody></table></div>`;
   return `<div class="card"><h2 class="section">📊 Dashboard</h2>
+      ${rangeSel}
       <div class="grid g4">${statCards}</div></div>
     ${availCard}
     ${donationCard}`;
