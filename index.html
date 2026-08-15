@@ -391,7 +391,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-15-b43';
+const APP_BUILD='2026-08-15-b44';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -557,6 +557,25 @@ function peakRoomsUsedRange(hid,type,from,to){ const wStart=from, wEnd=nextDay(t
   const ev=[]; segs.forEach(([s,e,r])=>{ ev.push([s,r]); ev.push([e,-r]); });
   ev.sort((a,b)=> a[0]<b[0]?-1 : a[0]>b[0]?1 : (a[1]-b[1]));
   let cur=0,pk=0; ev.forEach(x=>{ cur+=x[1]; if(cur>pk)pk=cur; }); return pk; }
+/* ---- Per-hotel availability calendar ----
+   h.availNights = list of nights (YYYY-MM-DD) the hotel is open. Absent/empty ⇒ open every festival night.
+   h.nightCaps   = optional { date: maxRooms } cap on total rooms available that specific night (e.g. Hide Away). */
+function hotelNights(h){ return (h && h.availNights && h.availNights.length) ? h.availNights : null; }
+function hotelOpenOnNight(h,d){ const a=hotelNights(h); return a ? a.indexOf(d)>=0 : true; }
+/* Hotel must be open EVERY night of the stay [ci → co) to be offered for it. */
+function hotelOpenForStay(h,ci,co){ const a=hotelNights(h); if(!a) return true; if(!ci||!co) return true;
+  for(let d=ci; d<co; d=nextDay(d)){ if(a.indexOf(d)<0) return false; } return true; }
+/* Rooms of a type physically available on night d (respects the per-night cap and open/closed nights). */
+function roomCapOnNight(h,type,d){ const r=(h.rooms||[]).find(x=>x.type===type); if(!r) return 0; if(!hotelOpenOnNight(h,d)) return 0;
+  const nc=h.nightCaps && h.nightCaps[d]; return (nc!=null) ? Math.min(r.count, nc) : r.count; }
+/* Rooms of a type occupied on the night of d (checkin ≤ d < checkout). */
+function roomsUsedOnNight(hid,type,d,excludeId){ return DB.bookings.filter(b=>b.hotel===hid&&b.status==='confirmed'&&b.id!==excludeId
+    && (b.checkin||DB.rules.eventStart)<=d && d<(b.checkout||DB.rules.eventEnd))
+  .reduce((s,b)=> s + bookingRooms(b).filter(rp=>rp.type===type).reduce((a,rp)=>a+rp.rooms,0), 0); }
+/* Rooms of a type free for a WHOLE stay [ci → co): the tightest night wins. 0 if the hotel is closed any night. */
+function freeRoomsForStay(h,type,ci,co,excludeId){ if(!ci||!co){ const r=(h.rooms||[]).find(x=>x.type===type); return r?Math.max(0,r.count-roomsAssignedByType(h.id,type,excludeId)):0; }
+  let mn=Infinity; for(let d=ci; d<co; d=nextDay(d)){ if(!hotelOpenOnNight(h,d)) return 0; const free=roomCapOnNight(h,type,d)-roomsUsedOnNight(h.id,type,d,excludeId); if(free<mn) mn=free; }
+  return mn===Infinity ? 0 : Math.max(0,mn); }
 let availDate=null;
 function setAvailDate(v){ availDate=v; render(); }
 let dashFrom=null, dashTo=null;
@@ -603,23 +622,21 @@ function buildPlans(b,allowExtra){
   const cat=guestCategory(b);                                // D1 / D2 / D3
   const catList = typed ? DB.rules.guestTypeHotels[gt] : (DB.rules.categoryHotels[cat]||[]);  // suggested hotel(s)
   const reserved=reservedHotelIds();                         // D1-only hotels — never for D2/D3
-  // Guest houses that other hotels transfer INTO after they close (Braj Nidhi). After the cutoff these are the only rooms left.
-  const transferTargets=new Set(DB.hotels.filter(h=>h.transferTo).map(h=>h.transferTo));
-  // Is any ordinary (non-reserved, non-manual) guest house still open for this stay's dates?
+  // Is any ordinary (non-reserved, non-manual) guest house OPEN for this stay's exact dates?
   const openGeneralExists=DB.hotels.some(h=> h.active && !h.manualOnly && !reserved.includes(h.id)
-      && !(h.availableUntil && b.checkin && b.checkin>=h.availableUntil)
+      && hotelOpenForStay(h,b.checkin,b.checkout)
       && b.donation>=(h.minDonation||0));
   const plans=[];
   DB.hotels.filter(h=>{ if(!h.active) return false;
       if(h.manualOnly) return false;                          // never auto-suggested (e.g. Madhav Kutir) — Super Admin assigns manually
-      if(h.availableUntil && b.checkin && b.checkin>=h.availableUntil) return false;  // hotel closes before this stay even starts → not available
+      if(!hotelOpenForStay(h,b.checkin,b.checkout)) return false;  // hotel not available for every night of this stay → don't offer it
       if(typed) return catList.includes(h.id);                // PR/Media/Volunteer → only their fixed hotel, donation gate bypassed
-      if(!openGeneralExists) return transferTargets.has(h.id);// after the cutoff no other hotel is open → offer ONLY Braj Nidhi, to every guest (bypass reserve + min gates)
+      if(!openGeneralExists) return h.id==='h1';               // no other hotel open for these dates → offer ONLY Braj Nidhi, to every guest (bypass reserve + min gates)
       if(b.donation<(h.minDonation||0)) return false;         // FR hotel eligibility gate
       if(cat!=='D1' && reserved.includes(h.id)) return false; // reserved hotels only for D1
       return true; }).forEach(h=>{
     h.rooms.forEach(r=>{
-      const vac=vacantRooms(h.id,r.type,r.count,b); if(vac<minRooms) return;   // date-aware: rooms free for THIS booking's dates
+      const vac=freeRoomsForStay(h,r.type,b.checkin,b.checkout,b.id); if(vac<minRooms) return;   // date-aware + per-night caps
       for(let rooms=minRooms; rooms<=vac; rooms++){
         const grant=h.extraBedding?Math.min(want,rooms):0;    // honor the request: 1 extra bed per room, only if hotel allows
         const capacity=rooms*r.cap+grant;
@@ -1019,15 +1036,18 @@ function viewDash(){
   const dTo   = dashTo   || prevDay(DB.rules.eventEnd);
   const single = dFrom===dTo;
   const overlapsRange=b=> datesOverlap(dFrom, nextDay(dTo), (b.checkin||DB.rules.eventStart), (b.checkout||DB.rules.eventEnd));
+  const dWinEnd=nextDay(dTo);   // occupancy window covers nights dFrom..dTo
   // Rooms occupied at the busiest night within the range (per hotel/room-type pool, then summed).
   const roomsBooked=hotels.reduce((s,h)=>s+h.rooms.reduce((a,r)=>a+peakRoomsUsedRange(h.id,r.type,dFrom,dTo),0),0);
+  // Rooms bookable for these dates = only hotels open for the whole span, respecting per-night caps.
+  const roomsAvail=hotels.filter(h=>h.active && hotelOpenForStay(h,dFrom,dWinEnd)).reduce((s,h)=>s+h.rooms.reduce((a,r)=>a+freeRoomsForStay(h,r.type,dFrom,dWinEnd),0),0);
   const pending=bk.filter(b=>b.status==='pending' && overlapsRange(b)).length;
   const confirmed=bk.filter(b=>b.status==='confirmed' && overlapsRange(b)).length;
   const waitlist=bk.filter(b=>b.status==='waitlist' && overlapsRange(b)).length;
   const totDon=bk.reduce((s,b)=>s+(b.donation||0),0);
   const verifDon=bk.filter(b=>b.receipt).reduce((s,b)=>s+(b.donation||0),0);
   const stats=[['Hotels',hotels.filter(h=>h.active).length],['Total Rooms',totRooms],['Total Capacity',totCap+' beds'],
-    ['Rooms Booked',roomsBooked],['Rooms Available',totRooms-roomsBooked],['Pending Requests',pending],
+    ['Rooms Booked',roomsBooked],['Rooms Available',roomsAvail],['Pending Requests',pending],
     ['Confirmed',confirmed],['Waitlisted',waitlist]];
   const statCards=stats.map(([l,n])=>`<div class="stat"><div class="n">${n}</div><div class="l">${l}</div></div>`).join('');
   const lastNight=prevDay(DB.rules.eventEnd);
@@ -1053,13 +1073,17 @@ function viewDash(){
         </div>
         <p class="muted" style="margin-top:14px">${bk.filter(b=>b.receipt).length} of ${bk.length} bookings have a receipt uploaded.</p>
       </div>`;
-  const availRows=hotelsByPriority().filter(h=>h.active).map(h=>{
-    const freeRooms=h.rooms.reduce((s,r)=>s+Math.max(0,r.count-peakRoomsUsedRange(h.id,r.type,dFrom,dTo)),0);
-    const byType=h.rooms.map(r=>{const f=Math.max(0,r.count-peakRoomsUsedRange(h.id,r.type,dFrom,dTo)); return `${esc(r.type)} ${f}`;}).join(' · ');
+  // Only guest houses OPEN for the selected dates are shown; each room type's free count respects per-night caps.
+  const capType=(h,r)=>{ let mn=Infinity; for(let d=dFrom; d<dWinEnd; d=nextDay(d)){ const c=roomCapOnNight(h,r.type,d); if(c<mn)mn=c; } return mn===Infinity?0:mn; };
+  const availRows=hotelsByPriority().filter(h=>h.active && hotelOpenForStay(h,dFrom,dWinEnd)).map(h=>{
+    const freeRooms=h.rooms.reduce((s,r)=>s+freeRoomsForStay(h,r.type,dFrom,dWinEnd),0);
+    const capTotal=h.rooms.reduce((s,r)=>s+capType(h,r),0);
+    const byType=h.rooms.map(r=>{const f=freeRoomsForStay(h,r.type,dFrom,dWinEnd); return `${esc(r.type)} ${f}`;}).join(' · ');
     return `<tr><td><b>${esc(h.name)}</b><div class="muted">${byType} free</div></td>
-      <td><b style="color:${freeRooms>0?'var(--green)':'var(--red)'}">${freeRooms}</b> <span class="muted">/ ${hotelRoomsTotal(h)}</span></td></tr>`; }).join('');
+      <td><b style="color:${freeRooms>0?'var(--green)':'var(--red)'}">${freeRooms}</b> <span class="muted">/ ${capTotal}</span></td></tr>`; }).join('')
+    || `<tr><td colspan="2" class="muted">No guest house is available for ${single?fmtD(dFrom):(fmtD(dFrom)+' → '+fmtD(nextDay(dTo)))}.</td></tr>`;
   const availCard=`<div class="card"><h2 class="section">🛏️ Rooms available by guest house</h2>
-    <p class="subhead">Rooms free for the dates selected above (${single?fmtD(dFrom):(fmtD(dFrom)+' → '+fmtD(nextDay(dTo)))}).</p>
+    <p class="subhead">Only guest houses available for the selected dates (${single?fmtD(dFrom):(fmtD(dFrom)+' → '+fmtD(nextDay(dTo)))}) are shown, with rooms free that day.</p>
     <table><thead><tr><th>Guest house</th><th>Rooms free</th></tr></thead><tbody>${availRows}</tbody></table></div>`;
   return `<div class="card"><h2 class="section">📊 Dashboard</h2>
       ${rangeSel}
@@ -1075,7 +1099,7 @@ function allocCell(b){
     return `<option value="${h.id}" ${b.hotel===h.id?'selected':''}>${esc(h.name)}${tag}</option>`; }).join('');
   const selHotel=DB.hotels.find(h=>h.id===b.hotel);
   const rtypes=(selHotel||{rooms:[]}).rooms
-    .map(r=>`<option value="${r.type}" ${b.roomType===r.type?'selected':''}>${r.type} · ${vacantRooms(selHotel?selHotel.id:'',r.type,r.count,b)} free</option>`).join('');
+    .map(r=>`<option value="${r.type}" ${b.roomType===r.type?'selected':''}>${r.type} · ${selHotel?freeRoomsForStay(selHotel,r.type,b.checkin,b.checkout,b.id):0} free</option>`).join('');
   const roomObj=selHotel&&b.roomType?selHotel.rooms.find(r=>r.type===b.roomType):null;
   const beds=roomObj?(b.rooms*roomObj.cap+(b.extraBeds||0)):0;
   const meta=[];
@@ -1390,7 +1414,8 @@ function approve(id,skipReceipt){ const b=DB.bookings.find(x=>x.id===id); if(!b)
   if(needsReceipt && !skipReceipt && !b.donationVerified){ toast(b.receiptWrong?'Receipt is marked WRONG — devotee must correct it (or use “Confirm without receipt”)':'Cannot confirm — verify the donation receipt first in the 🧾 Receipts panel'); return; }
   b.confirmedWithoutReceipt = !!(skipReceipt && needsReceipt && !b.donationVerified);
   const roomObj=h.rooms.find(r=>r.type===b.roomType);
-  const avail=(roomObj?roomObj.count:0)-roomsAssignedByType(h.id,b.roomType,id,b);   // date-aware: only stays overlapping this one occupy the room
+  if(!hotelOpenForStay(h,b.checkin,b.checkout)){ toast(h.name+' is not available for '+fmtD(b.checkin)+'→'+fmtD(b.checkout)+' — pick another guest house'); return; }
+  const avail=freeRoomsForStay(h,b.roomType,b.checkin,b.checkout,id);   // date-aware + per-night caps
   if(avail<=0){ toast('No '+b.roomType+' room free at '+h.name+' for '+fmtD(b.checkin)+'→'+fmtD(b.checkout)+' — pick another room type or hotel'); return; }
   if(b.rooms>avail){ toast('Only '+avail+' '+b.roomType+' room(s) free at '+h.name+' for these dates — reduce rooms to '+avail); return; }
   if((b.extraBeds||0)>0 && !h.extraBedding){ toast(h.name+' does not allow extra bedding — set extra beds to 0'); return; }
