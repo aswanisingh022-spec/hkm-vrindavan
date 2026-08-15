@@ -538,11 +538,18 @@ function buildPlans(b,allowExtra){
   const cat=guestCategory(b);                                // D1 / D2 / D3
   const catList = typed ? DB.rules.guestTypeHotels[gt] : (DB.rules.categoryHotels[cat]||[]);  // suggested hotel(s)
   const reserved=reservedHotelIds();                         // D1-only hotels — never for D2/D3
+  // Guest houses that other hotels transfer INTO after they close (Braj Nidhi). After the cutoff these are the only rooms left.
+  const transferTargets=new Set(DB.hotels.filter(h=>h.transferTo).map(h=>h.transferTo));
+  // Is any ordinary (non-reserved, non-manual) guest house still open for this stay's dates?
+  const openGeneralExists=DB.hotels.some(h=> h.active && !h.manualOnly && !reserved.includes(h.id)
+      && !(h.availableUntil && b.checkin && b.checkin>=h.availableUntil)
+      && b.donation>=(h.minDonation||0));
   const plans=[];
   DB.hotels.filter(h=>{ if(!h.active) return false;
       if(h.manualOnly) return false;                          // never auto-suggested (e.g. Madhav Kutir) — Super Admin assigns manually
       if(h.availableUntil && b.checkin && b.checkin>=h.availableUntil) return false;  // hotel closes before this stay even starts → not available
       if(typed) return catList.includes(h.id);                // PR/Media/Volunteer → only their fixed hotel, donation gate bypassed
+      if(!openGeneralExists) return transferTargets.has(h.id);// after the cutoff no other hotel is open → offer ONLY Braj Nidhi, to every guest (bypass reserve + min gates)
       if(b.donation<(h.minDonation||0)) return false;         // FR hotel eligibility gate
       if(cat!=='D1' && reserved.includes(h.id)) return false; // reserved hotels only for D1
       return true; }).forEach(h=>{
