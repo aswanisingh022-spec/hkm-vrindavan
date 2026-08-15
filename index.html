@@ -1039,13 +1039,14 @@ function allocCell(b){
   let seva;
   if(gt!=='FR'){ seva=`<div class="seva-free">🎫 ${esc(gt)} guest — no room payment required</div>`; }
   else if(b.donation>=DB.rules.freeMin){ seva=`<div class="seva-free">🙏 Eligible for free accommodation${seeMoney()?` — donation ₹${Number(DB.rules.freeMin).toLocaleString('en-IN')} or above`:''}</div>`; }
-  else { seva=`<div class="seva-collect ${b.sevaCollected?'done':''}">
+  else { const selCh = b.sevaChannel || (staffCollects(b) ? 'GPP' : 'Devotee');   // pre-fill from the devotee's own choice on the booking form
+    seva=`<div class="seva-collect ${b.sevaCollected?'done':''}">
        <span style="white-space:nowrap;font-weight:700">${b.sevaCollected?'✅ Seva by':'⚠ Seva by'}</span>
        <select onchange="setSevaChannel('${b.id}',this.value)" style="flex:1;min-width:0;font-size:12.5px;padding:5px 7px">
          <option value="">— not yet —</option>
-         <option value="GPP" ${b.sevaChannel==='GPP'?'selected':''}>GPP's Team</option>
-         <option value="GuestHouse" ${b.sevaChannel==='GuestHouse'?'selected':''}>Guest House Team</option>
-         <option value="Devotee" ${b.sevaChannel==='Devotee'?'selected':''}>Devotee — ${esc(b.brahmachari)}</option>
+         <option value="GPP" ${selCh==='GPP'?'selected':''}>GPP's Team</option>
+         <option value="GuestHouse" ${selCh==='GuestHouse'?'selected':''}>Guest House Team</option>
+         <option value="Devotee" ${selCh==='Devotee'?'selected':''}>Devotee — ${esc(b.brahmachari)}</option>
        </select></div>`; }
   return `<div class="alloc">
       <select class="a-sel" onchange="setField('${b.id}','hotel',this.value)"><option value="">— select hotel —</option>${hotelSel}</select>
