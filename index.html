@@ -431,8 +431,10 @@ function allocSummary(b){ const parts=bookingRooms(b).map(rp=>`${rp.type} × ${r
    automatically continues in the hotel's transfer-to guest house from that date. Returns 2 dated segments, or null. */
 function staySplit(b){
   const h=DB.hotels.find(x=>x.id===b.hotel); if(!h||!h.availableUntil||!h.transferTo) return null;
-  if(!b.checkin||!b.checkout || b.checkout<=h.availableUntil) return null;   // stay ends on/before cutoff → no split
+  if(!b.checkin||!b.checkout || b.checkout<=h.availableUntil) return null;   // stay ends on/before cutoff → no split (all in origin)
   const to=DB.hotels.find(x=>x.id===h.transferTo); if(!to) return null;
+  if(b.checkin>=h.availableUntil)                                            // stay STARTS after cutoff → origin closed, whole stay in transfer house
+    return [{name:to.name, from:b.checkin, to:b.checkout, hid:to.id, fullTransfer:true}];
   return [{name:h.name, from:b.checkin, to:h.availableUntil, hid:h.id}, {name:to.name, from:h.availableUntil, to:b.checkout, hid:to.id}];
 }
 /* Rooms available in the Braj Nidhi continuation house */
@@ -460,6 +462,10 @@ function allocDetailHTML(b){
   const split=staySplit(b);
   if(!split) return `<b>${esc(hotelName(b.hotel))}</b><div class="muted">${allocSummary(b)}</div>`;
   const tp=transferPlan(b);
+  if(split.length===1 && split[0].fullTransfer){
+    return `<div class="muted" style="color:var(--red);margin-bottom:2px">⚠ ${esc(hotelName(b.hotel))} is closed for these dates — full stay in ${esc(split[0].name)}</div>`+
+      `<div><b>${esc(split[0].name)}</b> <span class="muted">📅 ${fmtD(split[0].from)} → ${fmtD(split[0].to)} · ${esc(tp.type+' × '+tp.rooms)}</span></div>`;
+  }
   const roomFor=(i)=> i===0 ? allocSummary(b) : `${tp.type} × ${tp.rooms}`;
   return `<div class="muted" style="margin-bottom:2px">split by dates:</div>`+
     split.map((s,i)=>`<div><b>${i===0?'①':'②'} ${esc(s.name)}</b> <span class="muted">📅 ${fmtD(s.from)} → ${fmtD(s.to)} · ${esc(roomFor(i))}</span></div>`).join('');
@@ -514,6 +520,7 @@ function buildPlans(b,allowExtra){
   const plans=[];
   DB.hotels.filter(h=>{ if(!h.active) return false;
       if(h.manualOnly) return false;                          // never auto-suggested (e.g. Madhav Kutir) — Super Admin assigns manually
+      if(h.availableUntil && b.checkin && b.checkin>=h.availableUntil) return false;  // hotel closes before this stay even starts → not available
       if(typed) return catList.includes(h.id);                // PR/Media/Volunteer → only their fixed hotel, donation gate bypassed
       if(b.donation<(h.minDonation||0)) return false;         // FR hotel eligibility gate
       if(cat!=='D1' && reserved.includes(h.id)) return false; // reserved hotels only for D1
@@ -979,12 +986,22 @@ function allocCell(b){
     const tObj=braj.rooms.find(r=>r.type===tp.type);
     const tbeds=tObj?tp.rooms*tObj.cap:0;
     const auto=!b.transferRoomType?'<span class="muted" style="font-size:11px"> · auto</span>':'';
-    transferCtl=`<div class="a-transfer" style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--border)">
-       <div class="a-lbl" style="margin-bottom:4px">② Braj Nidhi from ${fmtD(split[1].from)}${auto}</div>
-       <select class="a-sel" onchange="setField('${b.id}','transferRoomType',this.value)"><option value="">— select room —</option>${tOpts}</select>
+    const roomPicker=`<select class="a-sel" onchange="setField('${b.id}','transferRoomType',this.value)"><option value="">— select room —</option>${tOpts}</select>
        <div class="a-row"><span class="a-lbl">Rooms</span>
          <div class="stepper"><button onclick="stepTransfer('${b.id}',-1)">−</button><input type="number" min="0" value="${tp.rooms}" onchange="setField('${b.id}','transferRooms',this.value)"><button onclick="stepTransfer('${b.id}',1)">+</button></div></div>
-       <div class="a-meta">${tbeds} beds / ${b.count} ppl ${tbeds>=b.count?'✅':'⚠ short'}</div></div>`;
+       <div class="a-meta">${tbeds} beds / ${b.count} ppl ${tbeds>=b.count?'✅':'⚠ short'}</div>`;
+    if(split.length===1 && split[0].fullTransfer){
+      // Origin house is closed for the whole stay → the guest can only be in Braj Nidhi
+      transferCtl=`<div class="a-transfer" style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--border)">
+         <div style="color:var(--red);font-weight:700;font-size:12.5px;margin-bottom:6px">⚠ ${esc(hotelName(b.hotel))} is closed for ${fmtD(b.checkin)}→${fmtD(b.checkout)} — the whole stay must be in Braj Nidhi.</div>
+         <button class="btn sm" style="margin-bottom:8px" onclick="fixClosedHotel('${b.id}')">↪ Move this booking to Braj Nidhi</button>
+         <div class="a-lbl" style="margin-bottom:4px">Braj Nidhi room${auto}</div>
+         ${roomPicker}</div>`;
+    } else {
+      transferCtl=`<div class="a-transfer" style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--border)">
+         <div class="a-lbl" style="margin-bottom:4px">② Braj Nidhi from ${fmtD(split[1].from)}${auto}</div>
+         ${roomPicker}</div>`;
+    }
   }
   const extraCtl=(selHotel&&selHotel.extraBedding)
     ? `<span class="a-lbl" style="margin-left:6px">Extra</span>
@@ -1248,6 +1265,12 @@ function stepTransfer(id,delta){ const b=DB.bookings.find(x=>x.id===id); if(!b)r
   const oldR=transferPlan(b).rooms; const nv=Math.max(0,oldR+delta); b.transferRooms=nv;
   if(b.status==='confirmed' && (isSuper()||isVcm()) && oldR!==nv) markEdited(b,'Braj Nidhi rooms: '+oldR+' → '+nv);
   save(); render(); }
+/* Move a booking whose origin house is closed for its whole stay straight into Braj Nidhi. */
+function fixClosedHotel(id){ const b=DB.bookings.find(x=>x.id===id); if(!b)return;
+  const tp=transferPlan(b); const oldHotel=hotelName(b.hotel);
+  b.hotel='h1'; b.roomType=tp.type; b.rooms=tp.rooms; b.roomPlan=null; b.transferRoomType=''; b.transferRooms=0;
+  if(b.status==='confirmed' && (isSuper()||isVcm())) markEdited(b,'Guest house: '+oldHotel+' (closed for these dates) → Braj Nidhi '+tp.type+' × '+tp.rooms);
+  save(); render(); toast('Moved to Braj Nidhi — '+tp.type+' × '+tp.rooms); }
 function approveNoReceipt(id){ if(!isSuper()){ toast('Only the Super Admin can confirm without a verified receipt'); return; } approve(id,true); }
 function approve(id,skipReceipt){ const b=DB.bookings.find(x=>x.id===id); if(!b)return;
   const h=DB.hotels.find(x=>x.id===b.hotel);
