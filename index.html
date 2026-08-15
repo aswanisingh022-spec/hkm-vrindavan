@@ -391,7 +391,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-15-b45';
+const APP_BUILD='2026-08-15-b46';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -1162,8 +1162,7 @@ function allocCell(b){
        <span style="white-space:nowrap;font-weight:700">${b.sevaCollected?'✅ Seva by':'⚠ Seva by'}</span>
        <select onchange="setSevaChannel('${b.id}',this.value)" style="flex:1;min-width:0;font-size:12.5px;padding:5px 7px">
          <option value="">— not yet —</option>
-         <option value="GPP" ${selCh==='GPP'?'selected':''}>GPP's Team</option>
-         <option value="GuestHouse" ${selCh==='GuestHouse'?'selected':''}>Guest House Team</option>
+         <option value="GPP" ${selCh==='GPP'?'selected':''}>GPP's Team (Staff)</option>
          <option value="Devotee" ${selCh==='Devotee'?'selected':''}>Devotee — ${esc(devoteeName(b))}</option>
        </select></div>`; }
   return `<div class="alloc">
@@ -1371,10 +1370,11 @@ function stepRooms(id,delta){ const b=DB.bookings.find(x=>x.id===id); if(!b)retu
   if(wasConfirmed && (isSuper()||isVcm()) && b.rooms!==oldRooms) markEdited(b,'Rooms: '+oldRooms+' → '+b.rooms);
   save(); render(); }
 function toggleSeva(id){ const b=DB.bookings.find(x=>x.id===id); if(!b)return; b.sevaCollected=!b.sevaCollected;
-  if(b.sevaCollected){ if(!b.sevaChannel)b.sevaChannel='GuestHouse'; b.sevaDate=b.sevaDate||new Date().toISOString().slice(0,10); } save(); render(); }
+  if(b.sevaCollected){ if(!b.sevaChannel)b.sevaChannel='GPP'; b.sevaDate=b.sevaDate||new Date().toISOString().slice(0,10); } save(); render(); }
 function setSevaChannel(id,v){ const b=DB.bookings.find(x=>x.id===id); if(!b)return;
+  if(v==='GuestHouse') v='GPP';   // VCM Guest House does not collect payment — always Staff/GPP
   b.sevaChannel=v; b.sevaCollected=!!v; b.sevaDate = v ? (b.sevaDate||new Date().toISOString().slice(0,10)) : ''; save(); render();
-  if(v) toast('Seva marked received by '+(v==='GPP'?"GPP's Team":v==='GuestHouse'?'Guest House Team':'Devotee')); }
+  if(v) toast('Seva marked received by '+(v==='GPP'?"GPP's Team (Staff)":'Devotee')); }
 /* Status shown to the devotee. A ₹50k+ donor (once receipt verified) is assured — status shows Confirmed
    even while the actual room/location is still being allocated. Location appears only after allocation. */
 function devoteeStatusPill(b){
@@ -1435,8 +1435,9 @@ function approve(id,skipReceipt){ const b=DB.bookings.find(x=>x.id===id); if(!b)
   if(avail<=0){ toast('No '+b.roomType+' room free at '+h.name+' for '+fmtD(b.checkin)+'→'+fmtD(oEnd)+' — pick another room type or hotel'); return; }
   if(b.rooms>avail){ toast('Only '+avail+' '+b.roomType+' room(s) free at '+h.name+' for these dates — reduce rooms to '+avail); return; }
   if((b.extraBeds||0)>0 && !h.extraBedding){ toast(h.name+' does not allow extra bedding — set extra beds to 0'); return; }
-  // "Devotee will collect" is handled by the devotee — NO seva step and NO blockage; just book. Staff-collect must be marked Paid first.
-  if(needsReceipt && !skipReceipt && b.donation<DB.rules.freeMin && b.sevaPlan!=='devotee' && !b.sevaCollected){ toast('Staff must mark this seva Paid before booking (or set it On hold to keep it pending)'); return; }
+  // Room allotment is NEVER blocked by a pending seva payment. Staff-collect bookings just show "Payment due"
+  // and Staff (GPP's Team) can collect it later. Auto-mark the channel as Staff when it's not the devotee's own.
+  if(needsReceipt && b.donation<DB.rules.freeMin && !b.sevaCollected && b.sevaPlan!=='devotee' && !b.sevaChannel){ b.sevaChannel='GPP'; }
   b.status='confirmed'; save(); render();
   const extraMsg=(b.extraBeds||0)>0?` + ${b.extraBeds} extra bed`:'';
   const cts=hotelSendContacts(h.id);
@@ -1795,7 +1796,7 @@ function viewReport(){
       <tbody id="reportRows">${rows||'<tr><td colspan="6" class="muted">No confirmed accommodations yet</td></tr>'}</tbody></table></div></div>`;
 }
 /* ---------------- Payments / Seva collected panel ---------------- */
-function sevaChannelLabel(b){ const v=b.sevaChannel; return v==='GPP'?"GPP's Team":v==='GuestHouse'?'Guest House Team':v==='Staff'?'Staff':v==='Devotee'?('Devotee — '+esc(devoteeName(b))):'—'; }
+function sevaChannelLabel(b){ const v=b.sevaChannel; return (v==='GPP'||v==='GuestHouse'||v==='Staff')?"GPP's Team (Staff)":v==='Devotee'?('Devotee — '+esc(devoteeName(b))):'—'; }
 /* Bookings that still need an accommodation seva collected (FR, below the free threshold, not settled) */
 function isLowAmount(b){ return (b.guestType||'FR')==='FR' && !isFreeStay(b) && b.status!=='cancelled' && b.status!=='withdrawn'; }
 function staffCollects(b){ return b.sevaPlan==='staff'; }                                       // otherwise the devotee collects
@@ -1810,7 +1811,7 @@ async function saveSevaNote(id,text){ const b=DB.bookings.find(x=>x.id===id); if
   try{ const {error}=await sb.from('bookings').update({data:bookingData(b),dev_id:b.devId||null}).eq('id',b.id);
     if(error){ console.warn('note save',error); toast('⚠ Could not save note — check connection'); } else toast('Status note saved'); }catch(e){ console.warn(e); } }
 async function markSeva(id,mode){ const b=DB.bookings.find(x=>x.id===id); if(!b)return;
-  if(mode==='paid'){ b.sevaCollected=true; b.sevaOnHold=false; b.sevaDate=new Date().toISOString().slice(0,10); b.sevaChannel = isVcm()?'GuestHouse':'GPP'; }   // Staff = GPP's Team
+  if(mode==='paid'){ b.sevaCollected=true; b.sevaOnHold=false; b.sevaDate=new Date().toISOString().slice(0,10); b.sevaChannel='GPP'; }   // room payment is always collected by Staff = GPP's Team (VCM does not collect)
   else if(mode==='hold'){ b.sevaOnHold=true; b.sevaCollected=false; }
   else if(mode==='unpaid'){ b.sevaCollected=false; b.sevaOnHold=false; }
   render();
@@ -1830,7 +1831,7 @@ function viewCollections(){
       <td>${b.receipt?esc(b.receipt):'<span class="muted">—</span>'}</td>
     </tr>`).join('');
   return `<div class="card"><h2 class="section">💰 Room Payments / Seva Collected <span class="pill p-confirmed">${paid.length}</span></h2>
-    <p class="subhead">Every guest whose room seva has been collected — through any channel (GPP's Team, Guest House Team, or a Devotee).</p>
+    <p class="subhead">Every guest whose room seva has been collected — by GPP's Team (Staff) or paid by the Devotee.</p>
     <div class="scrollx"><table><thead><tr><th>Guest / Family</th><th>Devotee</th><th>Guest house</th><th>Room</th><th>Payment</th><th>Received by</th><th>Date</th><th>Receipt no.</th></tr></thead>
       <tbody>${rows||'<tr><td colspan="8" class="muted">No seva collected yet</td></tr>'}</tbody></table></div></div>`;
 }
