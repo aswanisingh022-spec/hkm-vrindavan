@@ -1085,12 +1085,14 @@ function setBookedSort(v){ bookedSort=v; render(); }
 function sortBookings(list,mode){ const l=[...list];
   if(mode==='amtHigh') l.sort((a,c)=>(c.donation||0)-(a.donation||0));
   else if(mode==='amtLow') l.sort((a,c)=>(a.donation||0)-(c.donation||0));
+  else if(mode==='newest') l.sort((a,c)=>(c.created||0)-(a.created||0));     // most recently submitted first
+  else if(mode==='oldest') l.sort((a,c)=>(a.created||0)-(c.created||0));     // earliest submitted first
   else if(mode==='dateEarly') l.sort((a,c)=>(a.checkin||'').localeCompare(c.checkin||''));
   else if(mode==='dateLate') l.sort((a,c)=>(c.checkin||'').localeCompare(a.checkin||''));
   else l.sort((a,c)=>{ const da=(a.status==='pending'||a.status==='waitlist')?0:1, dc=(c.status==='pending'||c.status==='waitlist')?0:1; if(da!==dc)return da-dc; return reqSortVal(c)-reqSortVal(a); });
   return l; }
 function sortMenu(mode,fn){ const o=(v,l)=>`<option value="${v}" ${mode===v?'selected':''}>${l}</option>`;
-  return `<select onchange="${fn}(this.value)" style="max-width:190px">${o('priority','Sort: Priority')}${o('amtHigh','Amount: High → Low')}${o('amtLow','Amount: Low → High')}${o('dateEarly','Date: Earliest first')}${o('dateLate','Date: Latest first')}</select>`; }
+  return `<select onchange="${fn}(this.value)" style="max-width:210px">${o('priority','Sort: Priority')}${o('newest','Request: Newest first')}${o('oldest','Request: Oldest first')}${o('amtHigh','Amount: High → Low')}${o('amtLow','Amount: Low → High')}${o('dateEarly','Stay date: Earliest first')}${o('dateLate','Stay date: Latest first')}</select>`; }
 function viewRequests(){
   const list=sortBookings(DB.bookings.filter(b=>b.status!=='confirmed'), reqSort);
   const activeCount=list.filter(b=>b.status==='pending'||b.status==='waitlist').length;
