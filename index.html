@@ -849,6 +849,7 @@ function submitReq(){
     stays:stays, checkin:stays[0].checkin, checkout:stays[0].checkout,
     note:$('#reqNote').value.trim()};
   if(editingId){ const b=DB.bookings.find(x=>x.id===editingId);
+    if(b && !isSuper() && !isVcm() && b.status==='confirmed'){ editingId=null; confirmedLockMsg(); go('myreq'); return; }   // devotees cannot edit a confirmed booking
     if(b){ Object.assign(b,data); b.edited=true; b.editedAt=Date.now(); b.editedBy=USER.id; b.lastEditNote='Devotee updated the request (now '+b.count+' '+(b.count===1?'person':'people')+', '+b.roomsRequested+' room(s))'; b.receiptWrong=false;
       notify('edit',`Edited request: ${b.head} (now ${b.count} ${b.count===1?'person':'people'}, ${b.roomsRequested} room(s)${b.extraRequested?`, ${b.extraRequested} extra bed`:''}) — review allocation`,USER.name,b.id); }
     editingId=null; save(); toast('Request updated ✓ — admin notified'); go('myreq'); return; }
@@ -862,10 +863,11 @@ function submitReq(){
     `All rooms are booked right now, so your request goes on the <b>waiting list</b>.<br><br>A room can open up if a confirmed guest doesn\'t arrive or cancels. You can also <b>speak with the guest house team</b> to check on availability.<br><br>The team has been notified and will allocate a room as soon as one is free.`, '🕓'); }
   else toast('Request submitted ✓');
 }
-function guestEdit(id){ editingId=id; go('newreq'); }
-function guestCancel(id){ const b=DB.bookings.find(x=>x.id===id); if(!b)return;
+function confirmedLockMsg(){ toast('Room already confirmed — please contact the guest house for any change'); }
+function guestEdit(id){ const b=DB.bookings.find(x=>x.id===id); if(b&&b.status==='confirmed'){ confirmedLockMsg(); return; } editingId=id; go('newreq'); }
+function guestCancel(id){ const b=DB.bookings.find(x=>x.id===id); if(!b)return; if(b.status==='confirmed'){ confirmedLockMsg(); return; }
   b.status='cancelled'; notify('cancel',`Cancelled: ${b.head} — room released automatically`,b.brahmachari,b.id); save(); render(); toast('Request cancelled — room released'); }
-function guestWithdraw(id){ const b=DB.bookings.find(x=>x.id===id); if(!b)return;
+function guestWithdraw(id){ const b=DB.bookings.find(x=>x.id===id); if(!b)return; if(b.status==='confirmed'){ confirmedLockMsg(); return; }
   b.status='withdrawn'; notify('withdraw',`Pulled back: ${b.head} — room released automatically`,b.brahmachari,b.id); save(); render(); toast('Request pulled back — room released'); }
 function guestReopen(id){ const b=DB.bookings.find(x=>x.id===id); if(!b)return;
   b.status='pending'; b.edited=true; notify('reopen',`Reopened: ${b.head} — needs allocation`,b.brahmachari,b.id); save(); render(); toast('Request reopened — sent to admin'); }
@@ -922,7 +924,9 @@ function viewMyReq(){
   const rows=mine.map(b=>{
     const dead=b.status==='cancelled'||b.status==='withdrawn';
     const shareBtn=`<button class="btn sm" onclick="shareRequest('${b.id}')">📋 Copy image</button>`;
-    const actions=dead
+    const actions = b.status==='confirmed'
+      ? shareBtn+`<div class="muted" style="margin-top:6px;background:#e7f6ec;border:1px solid #bfe6cd;border-radius:8px;padding:6px 9px;font-size:12px;color:var(--green);font-weight:600">🔒 Room confirmed — for any change, please contact the guest house.</div>`
+      : dead
       ? shareBtn+`<button class="btn gray sm" onclick="guestReopen('${b.id}')">Reopen</button>`
       : shareBtn+`<button class="btn gray sm" onclick="guestEdit('${b.id}')">Edit</button>
          <button class="btn gray sm" onclick="guestCancel('${b.id}')">Cancel</button>
