@@ -1339,7 +1339,8 @@ function approve(id,skipReceipt){ const b=DB.bookings.find(x=>x.id===id); if(!b)
   b.confirmedWithoutReceipt = !!(skipReceipt && needsReceipt && !b.donationVerified);
   const roomObj=h.rooms.find(r=>r.type===b.roomType);
   const avail=(roomObj?roomObj.count:0)-roomsAssignedByType(h.id,b.roomType,id,b);   // date-aware: only stays overlapping this one occupy the room
-  if(b.rooms>avail){ toast('Only '+avail+' '+b.roomType+' room(s) free at '+h.name+' — reduce rooms'); return; }
+  if(avail<=0){ toast('No '+b.roomType+' room free at '+h.name+' for '+fmtD(b.checkin)+'→'+fmtD(b.checkout)+' — pick another room type or hotel'); return; }
+  if(b.rooms>avail){ toast('Only '+avail+' '+b.roomType+' room(s) free at '+h.name+' for these dates — reduce rooms to '+avail); return; }
   if((b.extraBeds||0)>0 && !h.extraBedding){ toast(h.name+' does not allow extra bedding — set extra beds to 0'); return; }
   // "Devotee will collect" is handled by the devotee — NO seva step and NO blockage; just book. Staff-collect must be marked Paid first.
   if(needsReceipt && !skipReceipt && b.donation<DB.rules.freeMin && b.sevaPlan!=='devotee' && !b.sevaCollected){ toast('Staff must mark this seva Paid before booking (or set it On hold to keep it pending)'); return; }
