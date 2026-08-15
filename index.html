@@ -341,6 +341,27 @@ async function loadFromCloud(){
   if(isAdmin){ if(Array.isArray(prR.data)){ DB.assign={}; DB.loginList=[]; prR.data.forEach(p=>{ DB.loginList.push(p); DB.assign[p.login_id]=p.assigned_name||''; }); }
     if(Array.isArray(crR.data)){ DB.creds={}; crR.data.forEach(c=>DB.creds[c.login_id]=c.pw); } }
   syncHotelMinFromRules();
+  autoFixClosedBookings();   // repair any booking sitting in a hotel that's closed for its whole stay
+}
+/* Any confirmed booking assigned to a guest house that closes BEFORE its stay begins is invalid —
+   the guest can only be in the transfer house (Braj Nidhi). Move them automatically. Admin/VCM only,
+   and idempotent (once moved, the booking no longer matches). */
+function autoFixClosedBookings(){
+  if(!USER || !(USER.role==='admin'||USER.role==='vcm')) return false;
+  let changed=false;
+  DB.bookings.forEach(b=>{
+    if(b.status!=='confirmed' || !b.checkin) return;
+    const h=DB.hotels.find(x=>x.id===b.hotel);
+    if(h && h.availableUntil && h.transferTo && b.checkin>=h.availableUntil){
+      const tp=transferPlan(b), oldHotel=hotelName(b.hotel);
+      b.hotel=h.transferTo; b.roomType=tp.type; b.rooms=tp.rooms; b.roomPlan=null; b.transferRoomType=''; b.transferRooms=0;
+      b.edited=true; b.editedAt=Date.now(); b.editedBy='system'; b.lastEditNote='Guest house: '+oldHotel+' (closed for these dates) → '+hotelName(b.hotel)+' '+tp.type+' × '+tp.rooms+' (auto-corrected)';
+      notify('edit', (b.head?b.head+' — ':'')+'auto-moved to '+hotelName(b.hotel)+' ('+oldHotel+' is closed for these dates)', b.brahmachari||'', b.id);
+      changed=true;
+    }
+  });
+  if(changed) save();
+  return changed;
 }
 async function syncToCloud(){
   if(!USER) return; const role=USER.role, mylogin=USER.id;
