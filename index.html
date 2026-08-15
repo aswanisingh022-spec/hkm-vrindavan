@@ -1022,11 +1022,7 @@ function viewDash(){
   return `<div class="card"><h2 class="section">📊 Dashboard</h2>
       <div class="grid g4">${statCards}</div></div>
     ${availCard}
-    <div class="${isStaff?'':'grid g2'}">
-      <div class="card"><h2 class="section">🏨 Occupancy by Hotel</h2>
-        <table><thead><tr><th>Hotel</th><th>Guests</th><th>Fill</th><th></th></tr></thead><tbody>${occ}</tbody></table></div>
-      ${donationCard}
-    </div>`;
+    ${donationCard}`;
 }
 
 /* ---------------- Shared allocation editor cell ---------------- */
