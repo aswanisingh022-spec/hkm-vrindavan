@@ -761,14 +761,22 @@ function renderDateRows(){ const c=$('#dateRows'); if(!c) return;
     const same = i>0 ? `<label class="rooms-mini" style="margin-left:8px;display:inline-flex;gap:4px;align-items:center"><input type="checkbox" style="width:auto" class="sameAbove" data-i="${i}" onchange="toggleSame(${i})"> same as Room 1</label>`:'';
     html+=`<fieldset><legend>${label}${same}</legend>
       <div class="grid g2">
-        <div><label>Check-in</label><input type="date" class="ci" data-i="${i}" min="${DB.rules.eventStart}" max="${DB.rules.eventEnd}" value="${prevCi[i]||''}"></div>
-        <div><label>Check-out</label><input type="date" class="co" data-i="${i}" min="${DB.rules.eventStart}" max="${DB.rules.eventEnd}" value="${prevCo[i]||''}"></div>
+        <div><label>Check-in</label><input type="date" class="ci" data-i="${i}" min="${DB.rules.eventStart}" max="${DB.rules.eventEnd}" value="${prevCi[i]||''}" onchange="syncDates(${i})"></div>
+        <div><label>Check-out</label><input type="date" class="co" data-i="${i}" min="${prevCi[i]||DB.rules.eventStart}" max="${DB.rules.eventEnd}" value="${prevCo[i]||''}" onchange="syncDates(${i})"></div>
       </div>
       <label style="display:flex;gap:8px;align-items:center;margin-top:10px;font-size:14px;color:var(--muted);font-weight:600">
         <input type="checkbox" class="exBed" data-i="${i}" style="width:auto" ${prevEx[i]?'checked':''}> 🛏️ Need an extra bed in this room? <span style="font-weight:400">(for a child / same family — 1 max)</span></label>
       </fieldset>`;
   }
   c.innerHTML=html;
+}
+/* Keep a stay's dates sane: check-out cannot be on/before check-in. Locks the check-out picker's
+   minimum to the check-in date and clears an already-invalid check-out. */
+function syncDates(i){
+  const ci=document.querySelector('.ci[data-i="'+i+'"]'), co=document.querySelector('.co[data-i="'+i+'"]');
+  if(!ci||!co) return;
+  if(ci.value){ co.min=ci.value; if(co.value && co.value<=ci.value){ co.value=''; toast('Check-out must be after check-in — please pick a later date'); } }
+  else { co.min=DB.rules.eventStart; }
 }
 function toggleSame(i){
   const ci0=document.querySelector('.ci[data-i="0"]').value, co0=document.querySelector('.co[data-i="0"]').value;
