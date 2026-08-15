@@ -391,7 +391,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-15-b41';
+const APP_BUILD='2026-08-15-b42';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -543,8 +543,9 @@ function roomsUsedOnDate(hid,type,d){ if(!d) return peakRoomsUsed(hid,type);
   return DB.bookings.filter(b=>b.hotel===hid&&b.status==='confirmed'
       && (b.checkin||DB.rules.eventStart)<=d && d<(b.checkout||DB.rules.eventEnd))
     .reduce((s,b)=> s + bookingRooms(b).filter(rp=>rp.type===type).reduce((a,rp)=>a+rp.rooms,0), 0); }
-function nextDay(d){ const x=new Date(d+'T00:00'); if(isNaN(x)) return d; x.setDate(x.getDate()+1); return x.toISOString().slice(0,10); }
-function prevDay(d){ const x=new Date(d+'T00:00'); if(isNaN(x)) return d; x.setDate(x.getDate()-1); return x.toISOString().slice(0,10); }
+// Timezone-safe day math (using UTC so IST/other offsets don't shift the date).
+function nextDay(d){ const p=(d||'').split('-').map(Number); if(p.length!==3) return d; return new Date(Date.UTC(p[0],p[1]-1,p[2]+1)).toISOString().slice(0,10); }
+function prevDay(d){ const p=(d||'').split('-').map(Number); if(p.length!==3) return d; return new Date(Date.UTC(p[0],p[1]-1,p[2]-1)).toISOString().slice(0,10); }
 function nightsBetween(from,to){ const a=new Date(from+'T00:00'), b=new Date(to+'T00:00'); if(isNaN(a)||isNaN(b)) return 1; return Math.max(1, Math.round((b-a)/86400000)+1); }
 /* Peak rooms of a type used at any single night WITHIN [from..to] (date-aware, clipped to the window). */
 function peakRoomsUsedRange(hid,type,from,to){ const wStart=from, wEnd=nextDay(to); const segs=[];
