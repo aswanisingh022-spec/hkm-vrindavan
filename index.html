@@ -521,6 +521,14 @@ function peakRoomsUsed(hid,type,excludeId){ const segs=[];
   ev.sort((a,b)=> a[0]<b[0]?-1 : a[0]>b[0]?1 : (a[1]-b[1]));   // on the same day, free (−) before occupy (+) → turnover reuse
   let cur=0,peak=0; ev.forEach(e=>{ cur+=e[1]; if(cur>peak)peak=cur; }); return peak; }
 function freeRoomsByType(hid,type,count){ return Math.max(0,count-peakRoomsUsed(hid,type)); }
+/* Rooms of a type occupied on the NIGHT of date d (a booking occupies it when checkin ≤ d < checkout). */
+function roomsUsedOnDate(hid,type,d){ if(!d) return peakRoomsUsed(hid,type);
+  return DB.bookings.filter(b=>b.hotel===hid&&b.status==='confirmed'
+      && (b.checkin||DB.rules.eventStart)<=d && d<(b.checkout||DB.rules.eventEnd))
+    .reduce((s,b)=> s + bookingRooms(b).filter(rp=>rp.type===type).reduce((a,rp)=>a+rp.rooms,0), 0); }
+function nextDay(d){ const x=new Date(d+'T00:00'); if(isNaN(x)) return d; x.setDate(x.getDate()+1); return x.toISOString().slice(0,10); }
+let availDate=null;
+function setAvailDate(v){ availDate=v; render(); }
 /* Greedy pack a group of `need` people into a hotel's free rooms (largest rooms first). Returns a
    roomPlan [{type,rooms}] only if the WHOLE group fits (one-group-one-hotel), else null. excludeId frees that booking's rooms. */
 function packGroup(hid,need,excludeId){
@@ -996,16 +1004,18 @@ function viewDash(){
         </div>
         <p class="muted" style="margin-top:14px">${bk.filter(b=>b.receipt).length} of ${bk.length} bookings have a receipt uploaded.</p>
       </div>`;
+  const availDay = availDate || DB.rules.eventStart;   // which night's availability to show
   const availRows=hotelsByPriority().filter(h=>h.active).map(h=>{
-    const freeRooms=h.rooms.reduce((s,r)=>s+Math.max(0,r.count-peakRoomsUsed(h.id,r.type)),0);
-    const freeBeds=h.rooms.reduce((s,r)=>s+Math.max(0,r.count-peakRoomsUsed(h.id,r.type))*r.cap,0);
-    const byType=h.rooms.map(r=>{const f=Math.max(0,r.count-peakRoomsUsed(h.id,r.type)); return `${esc(r.type)} ${f}`;}).join(' · ');
+    const freeRooms=h.rooms.reduce((s,r)=>s+Math.max(0,r.count-roomsUsedOnDate(h.id,r.type,availDay)),0);
+    const byType=h.rooms.map(r=>{const f=Math.max(0,r.count-roomsUsedOnDate(h.id,r.type,availDay)); return `${esc(r.type)} ${f}`;}).join(' · ');
     return `<tr><td><b>${esc(h.name)}</b><div class="muted">${byType} free</div></td>
-      <td><b style="color:${freeRooms>0?'var(--green)':'var(--red)'}">${freeRooms}</b> <span class="muted">/ ${hotelRoomsTotal(h)}</span></td>
-      <td><b>${freeBeds}</b> <span class="muted">/ ${hotelCapacity(h)}</span></td></tr>`; }).join('');
+      <td><b style="color:${freeRooms>0?'var(--green)':'var(--red)'}">${freeRooms}</b> <span class="muted">/ ${hotelRoomsTotal(h)}</span></td></tr>`; }).join('');
   const availCard=`<div class="card"><h2 class="section">🛏️ Rooms available by guest house</h2>
-    <p class="subhead">Live free rooms and beds in every guest house.</p>
-    <table><thead><tr><th>Guest house</th><th>Rooms free</th><th>Beds free</th></tr></thead><tbody>${availRows}</tbody></table></div>`;
+    <p class="subhead">Rooms free on the night of the selected date. Change the date to see availability for any day of the festival.</p>
+    <div class="flex" style="margin-bottom:12px;gap:10px;align-items:center;flex-wrap:wrap"><label style="font-weight:600">📅 Night of</label>
+      <input type="date" value="${availDay}" min="${DB.rules.eventStart}" max="${DB.rules.eventEnd}" onchange="setAvailDate(this.value)" style="max-width:180px">
+      <span class="muted">${fmtD(availDay)} → ${fmtD(nextDay(availDay))}</span></div>
+    <table><thead><tr><th>Guest house</th><th>Rooms free</th></tr></thead><tbody>${availRows}</tbody></table></div>`;
   return `<div class="card"><h2 class="section">📊 Dashboard</h2>
       <div class="grid g4">${statCards}</div></div>
     ${availCard}
