@@ -418,6 +418,9 @@ function uid(p){ return p+Math.random().toString(36).slice(2,8); }
 function esc(s){ return (s||'').toString().replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function money(n){ return '₹'+Number(n||0).toLocaleString('en-IN'); }
 function hotelName(id){ const h=DB.hotels.find(x=>x.id===id); return h?h.name:'—'; }
+/* Name of the devotee who made a booking: prefer the name currently assigned to their login ID
+   (Super Admin portal), fall back to the name saved on the booking, then the raw login ID. */
+function devoteeName(b){ if(!b) return ''; const a=(DB.assign && b.devId && DB.assign[b.devId]||'').trim(); if(a) return a; return (b.brahmachari||b.devId||'').trim(); }
 /* head of family + how many accompanied. Falls back to old guest-list format if present. */
 function headLabel(b){ if(b.head!==undefined&&b.head!=='') return esc(b.head)+(b.accompanying>0?' + '+b.accompanying:'');
   return esc((b.guests||[]).join(', ')); }
@@ -1046,7 +1049,7 @@ function allocCell(b){
          <option value="">— not yet —</option>
          <option value="GPP" ${selCh==='GPP'?'selected':''}>GPP's Team</option>
          <option value="GuestHouse" ${selCh==='GuestHouse'?'selected':''}>Guest House Team</option>
-         <option value="Devotee" ${selCh==='Devotee'?'selected':''}>Devotee — ${esc(b.brahmachari)}</option>
+         <option value="Devotee" ${selCh==='Devotee'?'selected':''}>Devotee — ${esc(devoteeName(b))}</option>
        </select></div>`; }
   return `<div class="alloc">
       <select class="a-sel" onchange="setField('${b.id}','hotel',this.value)"><option value="">— select hotel —</option>${hotelSel}</select>
@@ -1068,7 +1071,7 @@ function guestCell(b,withSug){
   const dates=stayLabel(b);
   const catTag = (b.guestType&&b.guestType!=='FR') ? ' <span class="pill p-waitlist">'+esc(b.guestType)+'</span>' : ' '+catBadge(b);
   const fullTag = (b.bookedWhenFull && !b.hotel && b.status!=='confirmed') ? ' <span class="pill p-waitlist" title="Booked while all rooms were full">🕓 waitlist</span>' : '';
-  return `<b>${headLabel(b)}</b>${catTag}${fullTag}${editedTag(b)}${b.receiptWrong?' <span class="pill p-rejected">✗ receipt wrong</span>':''}<div class="muted">requested by ${esc(b.brahmachari)}${b.phone?` · 📱 ${esc(b.phone)}`:''}</div>
+  return `<b>${headLabel(b)}</b>${catTag}${fullTag}${editedTag(b)}${b.receiptWrong?' <span class="pill p-rejected">✗ receipt wrong</span>':''}<div class="muted">requested by ${esc(devoteeName(b))}${b.phone?` · 📱 ${esc(b.phone)}`:''}</div>
       <div class="muted">${peopleLabel(b)}${b.family?' · 👪 family':''}${b.extraRequested>0?` · 🛏️ ${b.extraRequested} extra bed requested`:''}${reqRoomsTxt}</div>
       ${dates?`<div class="muted" style="color:var(--saffron-dark)">${dates}</div>`:''}
       ${b.note?`<div class="muted" style="background:#fff4e4;border-radius:6px;padding:4px 8px;margin-top:4px">📝 ${esc(b.note)}</div>`:''}${sugHTML}`;
@@ -1221,7 +1224,7 @@ function viewBraj(){
   // Who is currently staying in Braj Nidhi, split by payment level (below ₹50k vs ₹50k+)
   const occ=DB.bookings.filter(b=>b.hotel===BRAJ_ID && b.status==='confirmed');
   const occRow=b=>`<tr>
-    <td data-label="Guest"><b>${esc(headLabel(b))}</b><div class="muted">${esc(peopleLabel(b))}${b.brahmachari?' · by '+esc(b.brahmachari):''}</div></td>
+    <td data-label="Guest"><b>${esc(headLabel(b))}</b><div class="muted">${esc(peopleLabel(b))}${b.brahmachari?' · by '+esc(devoteeName(b)):''}</div></td>
     <td data-label="Donation">${donDisplay(b)}</td>
     <td data-label="Payment level">${isFreeStay(b)?'<span class="pill p-confirmed">₹50k+ · free stay</span>':'<span class="pill p-pending">Below ₹50k · seva</span>'}</td>
     <td data-label="Room">${b.roomType?esc(allocSummary(b)):'—'}</td>
@@ -1474,7 +1477,7 @@ function viewVacancy(){
   }).join('');
   const un=unassignedBookings();
   const unRows=un.map(b=>`<tr>
-    <td><b>${headLabel(b)}</b><div class="muted">${peopleLabel(b)} · by ${esc(b.brahmachari)}</div></td>
+    <td><b>${headLabel(b)}</b><div class="muted">${peopleLabel(b)} · by ${esc(devoteeName(b))}</div></td>
     <td>${donDisplay(b)}</td><td>${statusPill(b.status)}</td>
     <td>${b.preferred&&b.preferred.length?esc(b.preferred.map(hotelName).join(', ')):'—'}</td>
     <td><button class="btn sm" onclick="go('requests')">Assign →</button></td></tr>`).join('');
@@ -1489,7 +1492,7 @@ function viewVacancy(){
 /* ---------------- Admin: Excel Export ---------------- */
 function bookingRow(b){ return {
   'Head of Family':b.head||'', 'Guest Mobile':b.phone||'', 'Accompanying':b.accompanying!==undefined?b.accompanying:'',
-  'Total People':b.count, 'Devotee':b.brahmachari, 'Donation (₹)':b.donation||0,
+  'Total People':b.count, 'Devotee':devoteeName(b), 'Donation (₹)':b.donation||0,
   'Guest Type':b.guestType||'FR', 'Receipt No':b.receipt||'', 'Receipt Verified':b.receiptWrong?'Wrong':(b.donationVerified?'Yes':'No'), 'Seva Received By':b.sevaChannel?sevaChannelLabel(b).replace(/<[^>]+>/g,''):'', 'Seva Date':b.sevaDate||'', 'Accommodation':b.donation>=DB.rules.freeMin?'Free':(b.sevaCollected?'Seva collected':'Seva pending'), 'Status':b.status, 'Hotel':b.hotel?hotelName(b.hotel):'',
   'Room Type':b.roomType||'', 'Rooms':b.rooms||0,
   'Extra Bed Requested':b.extraRequested||0, 'Extra Bed Given':b.extraBeds||0,
@@ -1605,7 +1608,7 @@ function viewReceipts(){
   const canVerify = isSuper() || !locked;   // VCM can verify only if the Super Admin has not locked it
   const rows=list.map(b=>`<tr data-search="${esc(((b.head||'')+' '+(b.brahmachari||'')+' '+(b.receipt||'')+' '+(b.phone||'')).toLowerCase())}">
       <td><b>${headLabel(b)}</b></td>
-      <td>${esc(b.brahmachari)}</td>
+      <td>${esc(devoteeName(b))}</td>
       <td><span class="rcp-copy" onclick="copyReceipt('${b.id}')" title="Click to copy — or select the text">${esc(b.receipt)}</span></td>
       <td>${b.receiptWrong?'<span class="pill p-rejected">✗ Wrong</span>':(b.donationVerified?'<span class="pill p-confirmed">Verified</span>':'<span class="pill p-pending">Unverified</span>')}</td>
       <td>${!canVerify
@@ -1641,7 +1644,7 @@ function reportBookings(){ let l=DB.bookings.filter(b=>b.status==='confirmed'); 
 /* full hotel text for a booking — lists BOTH guest houses with dates if the stay is split/extended */
 function hotelsTextForBooking(b){ const s=staySplit(b); if(s) return s.map(x=>`${x.name} (${x.from} to ${x.to})`).join(' + '); return hotelName(b.hotel); }
 function accommodationRow(b){ return {
-  'Guest / Family':b.head||'', 'Type':b.guestType||'FR', 'People':b.count, 'Mobile':b.phone||'', 'Devotee':b.brahmachari,
+  'Guest / Family':b.head||'', 'Type':b.guestType||'FR', 'People':b.count, 'Mobile':b.phone||'', 'Devotee':devoteeName(b),
   'Guest House(s)':hotelsTextForBooking(b), 'Rooms':allocSummary(b),
   'Check-in':b.checkin||'', 'Check-out':b.checkout||'', 'Nights':nights(b),
   'Seva':(b.guestType&&b.guestType!=='FR')?'—':(b.donation>=DB.rules.freeMin?'Free stay':(b.sevaCollected?('Received by '+sevaChannelLabel(b).replace(/<[^>]+>/g,'')):'Pending')),
@@ -1654,7 +1657,7 @@ function viewReport(){
   const hotelOpts=hotelsByPriority().filter(h=>h.active).map(h=>`<option value="${h.id}" ${reportHotel===h.id?'selected':''}>${esc(h.name)}</option>`).join('');
   const list=reportBookings();
   const rows=list.map(b=>`<tr data-search="${esc(((b.head||'')+' '+(b.phone||'')+' '+(b.brahmachari||'')).toLowerCase())}">
-      <td><b>${esc(b.head||'')}</b>${(b.guestType&&b.guestType!=='FR')?' <span class="pill p-waitlist">'+esc(b.guestType)+'</span>':''}<div class="muted">${peopleLabel(b)}${b.phone?' · 📱 '+esc(b.phone):''} · by ${esc(b.brahmachari)}</div></td>
+      <td><b>${esc(b.head||'')}</b>${(b.guestType&&b.guestType!=='FR')?' <span class="pill p-waitlist">'+esc(b.guestType)+'</span>':''}<div class="muted">${peopleLabel(b)}${b.phone?' · 📱 '+esc(b.phone):''} · by ${esc(devoteeName(b))}</div></td>
       <td>${allocHotelText(b)}</td>
       <td>${allocSummary(b)}</td>
       <td>${fmtD(b.checkin)}</td>
@@ -1672,7 +1675,7 @@ function viewReport(){
       <tbody id="reportRows">${rows||'<tr><td colspan="6" class="muted">No confirmed accommodations yet</td></tr>'}</tbody></table></div></div>`;
 }
 /* ---------------- Payments / Seva collected panel ---------------- */
-function sevaChannelLabel(b){ const v=b.sevaChannel; return v==='GPP'?"GPP's Team":v==='GuestHouse'?'Guest House Team':v==='Staff'?'Staff':v==='Devotee'?('Devotee — '+esc(b.brahmachari)):'—'; }
+function sevaChannelLabel(b){ const v=b.sevaChannel; return v==='GPP'?"GPP's Team":v==='GuestHouse'?'Guest House Team':v==='Staff'?'Staff':v==='Devotee'?('Devotee — '+esc(devoteeName(b))):'—'; }
 /* Bookings that still need an accommodation seva collected (FR, below the free threshold, not settled) */
 function isLowAmount(b){ return (b.guestType||'FR')==='FR' && !isFreeStay(b) && b.status!=='cancelled' && b.status!=='withdrawn'; }
 function staffCollects(b){ return b.sevaPlan==='staff'; }                                       // otherwise the devotee collects
@@ -1698,7 +1701,7 @@ function viewCollections(){
   const paid=DB.bookings.filter(b=>b.sevaCollected);
   const rows=paid.map(b=>`<tr>
       <td><b>${headLabel(b)}</b>${(b.guestType&&b.guestType!=='FR')?' <span class="pill p-waitlist">'+esc(b.guestType)+'</span>':''}</td>
-      <td>${esc(b.brahmachari)}</td>
+      <td>${esc(devoteeName(b))}</td>
       <td>${b.hotel?esc(hotelName(b.hotel)):'<span class="muted">—</span>'}</td>
       <td>${b.roomType?allocSummary(b):'<span class="muted">—</span>'}</td>
       <td><span class="pill p-confirmed">Seva received</span></td>
@@ -1727,7 +1730,7 @@ function viewSevaCollect(){
                      : ['Guest / Family','Booked by (Devotee)','Donation','Who collects','Payment / collected by','Dates','Action'];
   const row=b=>`<tr data-search="${esc(((b.head||'')+' '+(b.phone||'')+' '+(b.brahmachari||'')).toLowerCase())}">
     <td data-label="Guest"><b>${esc(headLabel(b))}</b><div class="muted">${esc(peopleLabel(b))}</div>${b.phone?`<div style="margin-top:2px"><a href="tel:${esc(b.phone)}" style="color:var(--saffron-dark);font-weight:600;text-decoration:none">📞 ${esc(b.phone)}</a></div>`:'<div class="muted">📞 no number</div>'}</td>
-    <td data-label="Booked by">${esc(b.brahmachari||'—')}</td>
+    <td data-label="Booked by">${esc(devoteeName(b)||'—')}</td>
     <td data-label="Donation">${amt(b)}</td>
     <td data-label="Who collects">${sevaPlanLabel(b)}</td>
     ${staff?'':`<td data-label="Payment / collected by">${sevaStatus(b)}</td>`}
@@ -1778,7 +1781,7 @@ function viewSettings(){
 }
 function viewDonations(){
   const rows=DB.bookings.map(b=>`<tr>
-    <td><b>${headLabel(b)}</b><div class="muted">by ${esc(b.brahmachari)} · ${peopleLabel(b)}</div></td>
+    <td><b>${headLabel(b)}</b><div class="muted">by ${esc(devoteeName(b))} · ${peopleLabel(b)}</div></td>
     <td>${money(b.donation)}</td>
     <td>${b.receipt?`📎 <b>${esc(b.receipt)}</b>`:'<span class="muted">no receipt no.</span>'}</td>
     <td>${b.donationVerified
