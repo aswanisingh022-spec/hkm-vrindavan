@@ -52,7 +52,7 @@
     .card > table, .card .scrollx{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch;white-space:nowrap}
     .btn{padding:11px 16px}
     .btn.sm{padding:7px 11px}
-    .row-actions{gap:8px}
+    .row-actions{grid-template-columns:1fr;gap:8px;max-width:none}
     header.topbar{padding:12px 14px}
     .brand h1{font-size:16px}
   }
@@ -83,7 +83,8 @@
   .rolebtn{padding:14px;border:2px solid var(--line);border-radius:12px;text-align:center;cursor:pointer;background:#fffdf9}
   .rolebtn.active{border-color:var(--saffron);background:#fff4e4}
   .rolebtn .ic{font-size:22px} .rolebtn .t{font-weight:700;font-size:14px;margin-top:4px} .rolebtn .s{font-size:11px;color:var(--muted)}
-  .row-actions{display:flex;gap:6px;flex-wrap:wrap}
+  .row-actions{display:grid;grid-template-columns:1fr 1fr;gap:6px;max-width:320px;margin-left:auto}
+  .row-actions .btn{width:100%;text-align:center}
   .bar{height:9px;border-radius:6px;background:#f0e6d6;overflow:hidden}
   .bar > span{display:block;height:100%;background:linear-gradient(90deg,var(--saffron),var(--gold))}
   .toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;
@@ -130,8 +131,8 @@
     table.stack-mobile tr td:last-child{border-bottom:0}
     table.stack-mobile td::before{content:attr(data-label);font-weight:700;color:var(--muted);text-align:left;flex:0 0 40%;white-space:nowrap}
     table.stack-mobile td .muted{text-align:right}
-    table.stack-mobile td .row-actions{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end}
-    table.stack-mobile td .btn.sm{flex:0 0 auto}
+    table.stack-mobile td .row-actions{display:grid;grid-template-columns:1fr 1fr;gap:6px;max-width:none}
+    table.stack-mobile td .btn.sm{width:100%}
   }
 </style>
 </head>
@@ -390,7 +391,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-15-b40';
+const APP_BUILD='2026-08-15-b41';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
