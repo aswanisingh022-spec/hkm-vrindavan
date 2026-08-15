@@ -438,7 +438,7 @@ function toast(msg){ const t=$('#toast'); t.textContent=msg; t.classList.add('sh
 function showNotice(title,bodyHTML,icon){ $('#noticeIcon').textContent=icon||'ℹ️'; $('#noticeTitle').textContent=title; $('#noticeBody').innerHTML=bodyHTML; $('#noticeOverlay').style.display='flex'; }
 function closeNotice(){ $('#noticeOverlay').style.display='none'; }
 /* Total un-allocated rooms across all active guest houses (0 = fully booked). */
-function totalFreeRooms(){ return DB.hotels.filter(h=>h.active).reduce((s,h)=>s+h.rooms.reduce((a,r)=>a+vacantRooms(h.id,r.type,r.count),0),0); }
+function totalFreeRooms(){ return DB.hotels.filter(h=>h.active).reduce((s,h)=>s+h.rooms.reduce((a,r)=>a+freeRoomsByType(h.id,r.type,r.count),0),0); }
 
 /* capacity used per hotel (sum of allocated rooms*cap not needed; track allocated guests) */
 function hotelCapacity(h){ return h.rooms.reduce((s,r)=>s+r.cap*r.count,0); }
@@ -497,10 +497,30 @@ function allocDetailHTML(b){
 /* compact hotel text (for narrow views like staff) showing the split when it applies */
 function allocHotelText(b){ const split=staySplit(b); if(!split) return esc(hotelName(b.hotel));
   return split.map(s=>`${esc(s.name)} <span class="muted">(${fmtD(s.from)}→${fmtD(s.to)})</span>`).join('<br>'); }
-/* rooms of a given type already assigned (confirmed) in a hotel, optionally excluding one booking */
-function roomsAssignedByType(hid,type,excludeId){ return DB.bookings.filter(b=>b.hotel===hid&&b.status==='confirmed'&&b.id!==excludeId)
+/* A booking's date range, defaulting to the whole festival window if a date is missing. */
+function bkRange(b){ return { in: (b&&b.checkin)||DB.rules.eventStart, out: (b&&b.checkout)||DB.rules.eventEnd }; }
+/* Two stays overlap only if one starts before the other ends. Same-day turnover (A checks out the day
+   B checks in) does NOT overlap — so the same room can serve both. */
+function datesOverlap(aIn,aOut,bIn,bOut){ return aIn < bOut && bIn < aOut; }
+/* rooms of a given type already assigned (confirmed) in a hotel, optionally excluding one booking.
+   If forB (a booking) is given, only count bookings whose dates OVERLAP forB's dates — so a room freed
+   before forB checks in is available again. */
+function roomsAssignedByType(hid,type,excludeId,forB){ const R=forB?bkRange(forB):null;
+  return DB.bookings.filter(b=>b.hotel===hid&&b.status==='confirmed'&&b.id!==excludeId
+      && (!R || datesOverlap(R.in,R.out,(b.checkin||DB.rules.eventStart),(b.checkout||DB.rules.eventEnd))))
   .reduce((s,b)=> s + bookingRooms(b).filter(rp=>rp.type===type).reduce((a,rp)=>a+rp.rooms,0), 0); }
-function vacantRooms(hid,type,count){ return Math.max(0,count-roomsAssignedByType(hid,type)); }
+function vacantRooms(hid,type,count,forB){ return Math.max(0,count-roomsAssignedByType(hid,type,forB&&forB.id,forB)); }
+/* Peak number of rooms of a type used at any one moment across the festival (date-aware): a room reused
+   by two non-overlapping stays counts once. Used for the "rooms free" summary displays. */
+function peakRoomsUsed(hid,type,excludeId){ const segs=[];
+  DB.bookings.filter(b=>b.hotel===hid&&b.status==='confirmed'&&b.id!==excludeId).forEach(b=>{
+    const rms=bookingRooms(b).filter(rp=>rp.type===type).reduce((a,rp)=>a+rp.rooms,0);
+    if(rms>0) segs.push([(b.checkin||DB.rules.eventStart),(b.checkout||DB.rules.eventEnd),rms]); });
+  if(!segs.length) return 0;
+  const ev=[]; segs.forEach(([ci,co,r])=>{ ev.push([ci,r]); ev.push([co,-r]); });
+  ev.sort((a,b)=> a[0]<b[0]?-1 : a[0]>b[0]?1 : (a[1]-b[1]));   // on the same day, free (−) before occupy (+) → turnover reuse
+  let cur=0,peak=0; ev.forEach(e=>{ cur+=e[1]; if(cur>peak)peak=cur; }); return peak; }
+function freeRoomsByType(hid,type,count){ return Math.max(0,count-peakRoomsUsed(hid,type)); }
 /* Greedy pack a group of `need` people into a hotel's free rooms (largest rooms first). Returns a
    roomPlan [{type,rooms}] only if the WHOLE group fits (one-group-one-hotel), else null. excludeId frees that booking's rooms. */
 function packGroup(hid,need,excludeId){
@@ -557,7 +577,7 @@ function buildPlans(b,allowExtra){
       if(cat!=='D1' && reserved.includes(h.id)) return false; // reserved hotels only for D1
       return true; }).forEach(h=>{
     h.rooms.forEach(r=>{
-      const vac=vacantRooms(h.id,r.type,r.count); if(vac<minRooms) return;
+      const vac=vacantRooms(h.id,r.type,r.count,b); if(vac<minRooms) return;   // date-aware: rooms free for THIS booking's dates
       for(let rooms=minRooms; rooms<=vac; rooms++){
         const grant=h.extraBedding?Math.min(want,rooms):0;    // honor the request: 1 extra bed per room, only if hotel allows
         const capacity=rooms*r.cap+grant;
@@ -706,7 +726,7 @@ function viewStaffRooms(){
 }
 function viewStaffVacancy(){
   const cards=hotelsByPriority().filter(h=>h.active).map(h=>{
-    const rows=h.rooms.map(r=>{ const used=roomsAssignedByType(h.id,r.type), vac=Math.max(0,r.count-used);
+    const rows=h.rooms.map(r=>{ const used=peakRoomsUsed(h.id,r.type), vac=Math.max(0,r.count-used);
       return `<tr><td>${esc(r.type)}</td><td>${r.count}</td><td>${used}</td>
         <td><b style="color:${vac>0?'var(--green)':'var(--red)'}">${vac}</b></td></tr>`; }).join('');
     return `<div class="card"><h2 class="section" style="margin:0 0 6px">🪟 ${esc(h.name)}</h2>
@@ -977,9 +997,9 @@ function viewDash(){
         <p class="muted" style="margin-top:14px">${bk.filter(b=>b.receipt).length} of ${bk.length} bookings have a receipt uploaded.</p>
       </div>`;
   const availRows=hotelsByPriority().filter(h=>h.active).map(h=>{
-    const freeRooms=h.rooms.reduce((s,r)=>s+Math.max(0,r.count-roomsAssignedByType(h.id,r.type)),0);
-    const freeBeds=h.rooms.reduce((s,r)=>s+Math.max(0,r.count-roomsAssignedByType(h.id,r.type))*r.cap,0);
-    const byType=h.rooms.map(r=>{const f=Math.max(0,r.count-roomsAssignedByType(h.id,r.type)); return `${esc(r.type)} ${f}`;}).join(' · ');
+    const freeRooms=h.rooms.reduce((s,r)=>s+Math.max(0,r.count-peakRoomsUsed(h.id,r.type)),0);
+    const freeBeds=h.rooms.reduce((s,r)=>s+Math.max(0,r.count-peakRoomsUsed(h.id,r.type))*r.cap,0);
+    const byType=h.rooms.map(r=>{const f=Math.max(0,r.count-peakRoomsUsed(h.id,r.type)); return `${esc(r.type)} ${f}`;}).join(' · ');
     return `<tr><td><b>${esc(h.name)}</b><div class="muted">${byType} free</div></td>
       <td><b style="color:${freeRooms>0?'var(--green)':'var(--red)'}">${freeRooms}</b> <span class="muted">/ ${hotelRoomsTotal(h)}</span></td>
       <td><b>${freeBeds}</b> <span class="muted">/ ${hotelCapacity(h)}</span></td></tr>`; }).join('');
@@ -1003,7 +1023,7 @@ function allocCell(b){
     return `<option value="${h.id}" ${b.hotel===h.id?'selected':''}>${esc(h.name)}${tag}</option>`; }).join('');
   const selHotel=DB.hotels.find(h=>h.id===b.hotel);
   const rtypes=(selHotel||{rooms:[]}).rooms
-    .map(r=>`<option value="${r.type}" ${b.roomType===r.type?'selected':''}>${r.type} · ${vacantRooms(selHotel?selHotel.id:'',r.type,r.count)} free</option>`).join('');
+    .map(r=>`<option value="${r.type}" ${b.roomType===r.type?'selected':''}>${r.type} · ${vacantRooms(selHotel?selHotel.id:'',r.type,r.count,b)} free</option>`).join('');
   const roomObj=selHotel&&b.roomType?selHotel.rooms.find(r=>r.type===b.roomType):null;
   const beds=roomObj?(b.rooms*roomObj.cap+(b.extraBeds||0)):0;
   const meta=[];
@@ -1017,7 +1037,7 @@ function allocCell(b){
   if(split){
     const tp=transferPlan(b);
     const braj=DB.hotels.find(h=>h.id==='h1')||{rooms:[]};
-    const tOpts=braj.rooms.map(r=>`<option value="${r.type}" ${tp.type===r.type?'selected':''}>${r.type} · ${vacantRooms('h1',r.type,r.count)} free</option>`).join('');
+    const tOpts=braj.rooms.map(r=>`<option value="${r.type}" ${tp.type===r.type?'selected':''}>${r.type} · ${vacantRooms('h1',r.type,r.count,b)} free</option>`).join('');
     const tObj=braj.rooms.find(r=>r.type===tp.type);
     const tbeds=tObj?tp.rooms*tObj.cap:0;
     const auto=!b.transferRoomType?'<span class="muted" style="font-size:11px"> · auto</span>':'';
@@ -1202,9 +1222,9 @@ function planText(plan){ return plan.map(p=>`${p.type} × ${p.rooms}`).join(' + 
 function viewBraj(){
   const braj=DB.hotels.find(h=>h.id===BRAJ_ID);
   if(!braj) return `<div class="card"><p class="muted">Braj Nidhi hotel not found.</p></div>`;
-  const freeRows=braj.rooms.map(r=>{ const free=Math.max(0,r.count-roomsAssignedByType(BRAJ_ID,r.type));
+  const freeRows=braj.rooms.map(r=>{ const free=Math.max(0,r.count-peakRoomsUsed(BRAJ_ID,r.type));
     return `<tr><td>${esc(r.type)}</td><td>${r.count}</td><td><b style="color:${free>0?'var(--green)':'var(--red)'}">${free}</b></td></tr>`; }).join('');
-  const totFree=braj.rooms.reduce((s,r)=>s+Math.max(0,r.count-roomsAssignedByType(BRAJ_ID,r.type)),0);
+  const totFree=braj.rooms.reduce((s,r)=>s+Math.max(0,r.count-peakRoomsUsed(BRAJ_ID,r.type)),0);
   // preview blocks
   let previewBlock='';
   if(reallocPlan){ previewBlock = reallocPlan.length
@@ -1318,7 +1338,7 @@ function approve(id,skipReceipt){ const b=DB.bookings.find(x=>x.id===id); if(!b)
   if(needsReceipt && !skipReceipt && !b.donationVerified){ toast(b.receiptWrong?'Receipt is marked WRONG — devotee must correct it (or use “Confirm without receipt”)':'Cannot confirm — verify the donation receipt first in the 🧾 Receipts panel'); return; }
   b.confirmedWithoutReceipt = !!(skipReceipt && needsReceipt && !b.donationVerified);
   const roomObj=h.rooms.find(r=>r.type===b.roomType);
-  const avail=(roomObj?roomObj.count:0)-roomsAssignedByType(h.id,b.roomType,id);
+  const avail=(roomObj?roomObj.count:0)-roomsAssignedByType(h.id,b.roomType,id,b);   // date-aware: only stays overlapping this one occupy the room
   if(b.rooms>avail){ toast('Only '+avail+' '+b.roomType+' room(s) free at '+h.name+' — reduce rooms'); return; }
   if((b.extraBeds||0)>0 && !h.extraBedding){ toast(h.name+' does not allow extra bedding — set extra beds to 0'); return; }
   // "Devotee will collect" is handled by the devotee — NO seva step and NO blockage; just book. Staff-collect must be marked Paid first.
@@ -1334,7 +1354,7 @@ function setStatus(id,s){ const b=DB.bookings.find(x=>x.id===id); if(!b)return; 
 /* ---------------- Admin: Hotels ---------------- */
 function viewHotels(){
   const cards=hotelsByPriority().map(h=>{
-    const roomRows=h.rooms.map((r,i)=>{ const assigned=roomsAssignedByType(h.id,r.type), vac=Math.max(0,r.count-assigned);
+    const roomRows=h.rooms.map((r,i)=>{ const assigned=peakRoomsUsed(h.id,r.type), vac=Math.max(0,r.count-assigned);
       const key=h.id+'_'+i, editing=editRoomKey===key;
       if(editing) return `<tr>
         <td><input id="er-type-${key}" value="${esc(r.type)}" style="width:130px"></td>
@@ -1471,11 +1491,11 @@ function toggleContactSend(id,i){ const h=DB.hotels.find(x=>x.id===id); const c=
 /* ---------------- Admin: Vacancy & Unassigned ---------------- */
 function viewVacancy(){
   const vacCards=hotelsByPriority().filter(h=>h.active).map(h=>{
-    const rows=h.rooms.map(r=>{ const used=roomsAssignedByType(h.id,r.type), vac=Math.max(0,r.count-used);
+    const rows=h.rooms.map(r=>{ const used=peakRoomsUsed(h.id,r.type), vac=Math.max(0,r.count-used);
       return `<tr><td>${esc(r.type)}</td><td>${r.count}</td><td>${used}</td>
         <td><b style="color:${vac>0?'var(--green)':'var(--red)'}">${vac}</b></td>
         <td>${vac*r.cap} beds</td></tr>`; }).join('');
-    const totVac=h.rooms.reduce((s,r)=>s+Math.max(0,r.count-roomsAssignedByType(h.id,r.type)),0);
+    const totVac=h.rooms.reduce((s,r)=>s+Math.max(0,r.count-peakRoomsUsed(h.id,r.type)),0);
     return `<div class="card"><h2 class="section" style="margin:0 0 6px">🛏️ ${esc(h.name)}
         <span class="pill ${totVac>0?'p-confirmed':'p-rejected'}">${totVac} rooms free</span></h2>
       <table><thead><tr><th>Room type</th><th>Total</th><th>Used</th><th>Vacant</th><th>Free beds</th></tr></thead>
