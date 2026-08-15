@@ -1098,7 +1098,7 @@ function viewRequests(){
   const activeCount=list.filter(b=>b.status==='pending'||b.status==='waitlist').length;
   const rows=list.map(b=>{
     const dead=b.status==='cancelled'||b.status==='withdrawn'||b.status==='rejected';
-    return `<tr id="row-${b.id}" data-search="${esc(((b.head||'')+' '+(b.phone||'')+' '+(b.brahmachari||'')).toLowerCase())}"${dead?' style="opacity:.6"':''}>
+    return `<tr id="row-${b.id}" data-search="${esc(((b.head||'')+' '+(b.phone||'')+' '+(b.brahmachari||'')+' '+devoteeName(b)+' '+(b.devId||'')).toLowerCase())}"${dead?' style="opacity:.6"':''}>
       <td>${guestCell(b,!dead)}</td>
       <td>${donDisplay(b)}<div class="muted">${donSub(b)}</div></td>
       <td>${statusPill(b.status)}</td>
@@ -1113,7 +1113,7 @@ function viewRequests(){
       </div></td></tr>`; }).join('');
   return `<div class="card"><h2 class="section">🆕 New Requests <span class="pill p-pending">${activeCount}</span></h2>
     <p class="subhead">Pick hotel → room type → adjust rooms → Confirm. Use <b>🔒 Lock &amp; Confirm</b> to confirm and protect it from auto-reallocation. Cancelled/pulled-back requests show greyed out with their room released.</p>
-    <div class="flex" style="margin-bottom:12px;gap:10px"><input placeholder="🔍 Search by guest name or number" value="${esc(searchQ['reqRows']||'')}" oninput="setSearch('reqRows',this.value)" style="flex:1">${sortMenu(reqSort,'setReqSort')}</div>
+    <div class="flex" style="margin-bottom:12px;gap:10px"><input placeholder="🔍 Search by guest name, number or devotee name" value="${esc(searchQ['reqRows']||'')}" oninput="setSearch('reqRows',this.value)" style="flex:1">${sortMenu(reqSort,'setReqSort')}</div>
     <div class="scrollx"><table><thead><tr><th>Request</th><th>Donation</th><th>Status</th><th>Allocation</th><th>Action</th></tr></thead>
       <tbody id="reqRows">${rows||'<tr><td colspan="5" class="muted">No pending requests 🎉</td></tr>'}</tbody></table></div></div>`;
 }
@@ -1121,7 +1121,7 @@ function viewRequests(){
 /* ---------------- Admin: Booked (confirmed, editable) ---------------- */
 function viewBooked(){
   const list=sortBookings(DB.bookings.filter(b=>b.status==='confirmed'), bookedSort);
-  const rows=list.map(b=>`<tr id="row-${b.id}" data-search="${esc(((b.head||'')+' '+(b.phone||'')+' '+(b.brahmachari||'')+' '+hotelName(b.hotel)).toLowerCase())}">
+  const rows=list.map(b=>`<tr id="row-${b.id}" data-search="${esc(((b.head||'')+' '+(b.phone||'')+' '+(b.brahmachari||'')+' '+devoteeName(b)+' '+(b.devId||'')+' '+hotelName(b.hotel)).toLowerCase())}">
       <td>${guestCell(b,false)}${b.locked?' <span class="pill p-waitlist">🔒 locked</span>':''}${b.confirmedWithoutReceipt?' <span class="pill p-rejected">⚠ no verified receipt</span>':''}</td>
       <td>${donDisplay(b)}</td>
       <td>${allocDetailHTML(b)}</td>
@@ -1133,7 +1133,7 @@ function viewBooked(){
       </div></td></tr>`).join('');
   return `<div class="card"><h2 class="section">✅ Booked <span class="pill p-confirmed">${list.length}</span></h2>
     <p class="subhead">These are confirmed. Edit the allocation and press <b>Save changes</b>. <b>Lock</b> a booking to protect it from automatic reallocation and swaps.</p>
-    <div class="flex" style="margin-bottom:12px;gap:10px"><input placeholder="🔍 Search by guest name, number or hotel" value="${esc(searchQ['bookedRows']||'')}" oninput="setSearch('bookedRows',this.value)" style="flex:1">${sortMenu(bookedSort,'setBookedSort')}</div>
+    <div class="flex" style="margin-bottom:12px;gap:10px"><input placeholder="🔍 Search by guest name, number, devotee or hotel" value="${esc(searchQ['bookedRows']||'')}" oninput="setSearch('bookedRows',this.value)" style="flex:1">${sortMenu(bookedSort,'setBookedSort')}</div>
     <div class="scrollx"><table><thead><tr><th>Guest</th><th>Donation</th><th>Current allocation</th><th>Edit allocation</th><th>Action</th></tr></thead>
       <tbody id="bookedRows">${rows||'<tr><td colspan="5" class="muted">No confirmed bookings yet.</td></tr>'}</tbody></table></div></div>`;
 }
