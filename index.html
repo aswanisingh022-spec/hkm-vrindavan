@@ -389,6 +389,19 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
   try{ await loadFromCloud(); render(); if(USER.role==='admin'||USER.role==='vcm') updateNotifBadge(); }catch(e){}
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
+/* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
+const APP_BUILD='2026-08-15-b40';
+async function checkForUpdate(){
+  try{
+    const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
+    if(typeof editingId!=='undefined' && editingId) return;
+    if(typeof currentTab!=='undefined' && currentTab==='newreq') return;
+    const t=await (await fetch(location.pathname+'?cb='+Date.now(),{cache:'no-store'})).text();
+    const m=t.match(/APP_BUILD='([^']+)'/);
+    if(m && m[1] && m[1]!==APP_BUILD){ try{toast('New version available — refreshing…');}catch(e){} setTimeout(()=>location.reload(), 900); }
+  }catch(e){}
+}
+setInterval(checkForUpdate, 120000);   // check every 2 minutes
 if(!DB.notifications) DB.notifications=[];
 if(!DB.assign) DB.assign={};   // login ID -> person the credential was given to
 if(!DB.rules) DB.rules=JSON.parse(JSON.stringify(DEFAULT_RULES));
