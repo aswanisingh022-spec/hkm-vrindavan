@@ -391,7 +391,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b51';
+const APP_BUILD='2026-08-16-b52';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -856,17 +856,18 @@ function viewNewReq(){
           <option value="Media">Media</option>
           <option value="Volunteer">Volunteer</option>
         </select></div>
-      <div><label>Donation amount (₹)</label><input id="reqDonation" type="number" min="0" placeholder="0"></div>
+      <div><label>Donation amount (₹)</label><input id="reqDonation" type="number" min="0" placeholder="0" oninput="syncSevaPlan()" onchange="syncSevaPlan()"></div>
     </div>
     <div><label>Donation receipt number <span id="rcpStar" style="color:var(--red)">*</span></label><input id="reqReceipt" placeholder="e.g. RCP-12345"></div>
     <p class="rooms-mini" id="typeNote" style="margin:4px 0 0">FR Guest — donation receipt number is required.</p>
     <div id="sevaPlanWrap" style="margin-top:10px;background:#f6efe2;border:1px dashed var(--line);border-radius:10px;padding:10px 14px">
-      <label style="margin-top:0">💰 Low-amount / payment request — for donations below ₹50,000, who will arrange the accommodation seva?</label>
-      <select id="reqSevaPlan">
+      <label style="margin-top:0">💰 Who will collect the room seva / payment?</label>
+      <select id="reqSevaPlan" onchange="sevaTouched()">
         <option value="devotee">I (Devotee) will collect / arrange the seva</option>
         <option value="staff">Staff will collect the seva</option>
+        <option value="foc">FOC — Free of cost (donation ₹50,000 &amp; above)</option>
       </select>
-      <p class="rooms-mini" style="margin:4px 0 0">For donations of ₹50,000+ the stay is free and this is ignored. Otherwise the chosen person collects the seva; it shows up for Staff, VCM Guest House and Super Admin.</p></div>
+      <p class="rooms-mini" id="sevaPlanNote" style="margin:4px 0 0">Donation ₹50,000 or above → <b>FOC (free of cost)</b> is auto-selected; you may change it. Below ₹50,000 → FOC is not available; choose Devotee or Staff. This shows up for Staff, VCM Guest House and Super Admin.</p></div>
     <p class="rooms-mini" style="margin:10px 0 0;color:var(--saffron-dark)">🎪 Festival stay only — check in between ${fmtD(DB.rules.eventStart)} and ${fmtD(prevDay(DB.rules.eventEnd))}, and check out by ${fmtD(DB.rules.eventEnd)} ${DB.rules.eventStart.slice(0,4)}.</p>
     <div id="dateRows"></div>
     <label>Note / special request to coordinator</label><textarea id="reqNote" rows="3" placeholder="e.g. any preference, medical need, elderly guest, arrival time... The admin will see this."></textarea>
@@ -883,7 +884,7 @@ function prefillEdit(){ if(!editingId) return; const b=DB.bookings.find(x=>x.id=
   const set=(id,v)=>{ const e=$(id); if(e) e.value=v; };
   set('#reqHead',b.head||''); set('#reqPhone',b.phone||''); set('#reqType',b.guestType||'FR'); updateTypeUI(); set('#reqTotal',b.count||1); updateSummary();
   set('#reqDonation',b.donation||''); set('#reqReceipt',b.receipt||'');
-  set('#reqRooms',b.roomsRequested||1); set('#reqSevaPlan',b.sevaPlan||'devotee');
+  set('#reqRooms',b.roomsRequested||1); set('#reqSevaPlan',b.sevaPlan||'devotee'); { const sp=$('#reqSevaPlan'); if(sp) sp.dataset.userTouched='1'; }
   (b.preferred||[]).forEach(pid=>{ const c=document.querySelector('.prefHotel[value="'+pid+'"]'); if(c) c.checked=true; });
   renderDateRows();
   const st=b.stays&&b.stays.length?b.stays:[{checkin:b.checkin,checkout:b.checkout,extra:(b.extraRequested>0)}];
@@ -930,6 +931,26 @@ function syncDates(i){
   if(ci.value){ co.min=ci.value; if(co.value && co.value<=ci.value){ co.value=''; toast('Check-out must be after check-in — please pick a later date'); } }
   else { co.min=DB.rules.eventStart; }
 }
+/* FOC gating: donation ≥ freeMin → FOC option enabled & auto-picked (devotee may change);
+   donation < freeMin → FOC disabled and cannot be selected (fall back to Devotee). */
+function sevaTouched(){ const sel=$('#reqSevaPlan'); if(sel) sel.dataset.userTouched='1'; }
+function syncSevaPlan(){
+  const sel=$('#reqSevaPlan'); if(!sel) return;
+  const amt=Math.max(0, Number(($('#reqDonation')||{}).value)||0);
+  const freeMin=Number(DB.rules.freeMin)||50000;
+  const eligible = amt>=freeMin;
+  const foc=sel.querySelector('option[value="foc"]');
+  if(foc) foc.disabled=!eligible;
+  if(eligible){
+    if(!sel.dataset.userTouched || sel.value==='') sel.value='foc';
+  } else {
+    if(sel.value==='foc'){ sel.value='devotee'; }
+  }
+  const note=$('#sevaPlanNote');
+  if(note){ note.innerHTML = eligible
+    ? 'Donation is ₹50,000 or above → eligible for <b>FOC (free of cost)</b>. It is auto-selected; you may switch to Devotee or Staff if you prefer.'
+    : 'Donation is below ₹50,000 → <b>FOC is not available</b>. Please choose Devotee or Staff to collect the seva.'; }
+}
 function toggleSame(i){
   const ci0=document.querySelector('.ci[data-i="0"]').value, co0=document.querySelector('.co[data-i="0"]').value;
   const ci=document.querySelector('.ci[data-i="'+i+'"]'), co=document.querySelector('.co[data-i="'+i+'"]');
@@ -944,10 +965,15 @@ function submitReq(){
   const guestType=($('#reqType')||{}).value||'FR';
   const receipt=$('#reqReceipt').value.trim();
   if(guestType==='FR' && !receipt){ toast('Donation receipt number is required for an FR Guest'); return; }
+  if(receipt && !/^(HMKV|VCMT).+/i.test(receipt)){ toast('Receipt number must start with HMKV or VCMT — e.g. HMKV-12345 or VCMT-678737'); return; }
   const phoneDigits=($('#reqPhone').value||'').replace(/\D/g,'');
   if(phoneDigits && phoneDigits.length!==10){ toast('Guest mobile number must be exactly 10 digits'); return; }
   if(receipt){ const rNorm=receipt.toLowerCase(); const dup=DB.bookings.find(x=>x.id!==editingId && x.status!=='cancelled' && x.status!=='withdrawn' && (x.receipt||'').trim().toLowerCase()===rNorm);
     if(dup){ showNotice('Receipt already used', `A request has already been submitted using receipt number <b>${esc(receipt)}</b>${dup.head?` (for <b>${esc(dup.head)}</b>)`:''}.<br><br>Each donation receipt can be used for only one booking request. Please check your existing requests, or use the correct receipt number.`, '⚠'); return; } }
+  const donationAmt=Math.max(0, Number($('#reqDonation').value)||0);
+  const sevaPlanVal=(($('#reqSevaPlan')||{}).value||'devotee');
+  const freeMinVal=Number(DB.rules.freeMin)||50000;
+  if(sevaPlanVal==='foc' && donationAmt<freeMinVal){ toast('FOC (free of cost) is only for donations of ₹'+freeMinVal.toLocaleString('en-IN')+' or above. Please choose Devotee or Staff.'); return; }
   const pref=[];
   const cis=[...document.querySelectorAll('.ci')], cos=[...document.querySelectorAll('.co')], exs=[...document.querySelectorAll('.exBed')];
   const stays=cis.map((el,idx)=>({checkin:el.value, checkout:(cos[idx]||{}).value||'', extra:!!(exs[idx]&&exs[idx].checked)}));
@@ -1826,7 +1852,7 @@ function sevaChannelLabel(b){ const v=b.sevaChannel; return (v==='GPP'||v==='Gue
 function isLowAmount(b){ return (b.guestType||'FR')==='FR' && !isFreeStay(b) && b.status!=='cancelled' && b.status!=='withdrawn'; }
 function staffCollects(b){ return b.sevaPlan==='staff'; }                                       // otherwise the devotee collects
 function needsStaffSeva(b){ return isLowAmount(b) && staffCollects(b) && !b.sevaCollected; }      // GPP's Team still to collect — unpaid or on hold
-function sevaPlanLabel(b){ return staffCollects(b) ? "🧑‍🔧 GPP's Team will collect" : '🙋 Devotee will collect'; }
+function sevaPlanLabel(b){ return b.sevaPlan==='foc' ? '🙏 FOC (free of cost)' : (staffCollects(b) ? "🧑‍🔧 GPP's Team will collect" : '🙋 Devotee will collect'); }
 function sevaStatus(b){ if(!staffCollects(b)) return '<span class="pill p-waitlist">🙋 Will be collected by devotee</span>';
   if(b.sevaCollected) return '<span class="pill p-confirmed">✅ Paid — collected by '+esc(sevaChannelLabel(b))+'</span>';
   return '<span class="pill p-pending">💰 Payment due</span>'; }
@@ -1981,7 +2007,7 @@ function viewLogins(){
 
 /* init total line after render */
 const _origRender=render;
-render=function(){ _origRender(); if(currentTab==='newreq'){ updateSummary(); renderDateRows(); prefillEdit(); updateTypeUI(); }
+render=function(){ _origRender(); if(currentTab==='newreq'){ updateSummary(); renderDateRows(); prefillEdit(); updateTypeUI(); syncSevaPlan(); }
   reapplySearches();
   if(USER&&(USER.role==='admin'||USER.role==='vcm')) updateNotifBadge(); };
 function updateNotifBadge(){ const n=DB.notifications.filter(x=>!x.ack).length; const el=$('#notifBadge');
