@@ -391,7 +391,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b49';
+const APP_BUILD='2026-08-16-b50';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -867,7 +867,7 @@ function viewNewReq(){
         <option value="staff">Staff will collect the seva</option>
       </select>
       <p class="rooms-mini" style="margin:4px 0 0">For donations of ₹50,000+ the stay is free and this is ignored. Otherwise the chosen person collects the seva; it shows up for Staff, VCM Guest House and Super Admin.</p></div>
-    <p class="rooms-mini" style="margin:10px 0 0;color:var(--saffron-dark)">🎪 Festival stay only — book between ${fmtD(DB.rules.eventStart)} and ${fmtD(DB.rules.eventEnd)} ${DB.rules.eventStart.slice(0,4)}.</p>
+    <p class="rooms-mini" style="margin:10px 0 0;color:var(--saffron-dark)">🎪 Festival stay only — check in between ${fmtD(DB.rules.eventStart)} and ${fmtD(prevDay(DB.rules.eventEnd))}, and check out by ${fmtD(DB.rules.eventEnd)} ${DB.rules.eventStart.slice(0,4)}.</p>
     <div id="dateRows"></div>
     <label>Note / special request to coordinator</label><textarea id="reqNote" rows="3" placeholder="e.g. any preference, medical need, elderly guest, arrival time... The admin will see this."></textarea>
     <div style="margin-top:14px;background:#fdf0dc;border:1px solid #f0d9b0;border-radius:9px;padding:10px 14px;font-size:13px;color:var(--amber)">
@@ -913,7 +913,7 @@ function renderDateRows(){ const c=$('#dateRows'); if(!c) return;
     const same = i>0 ? `<label class="rooms-mini" style="margin-left:8px;display:inline-flex;gap:4px;align-items:center"><input type="checkbox" style="width:auto" class="sameAbove" data-i="${i}" onchange="toggleSame(${i})"> same as Room 1</label>`:'';
     html+=`<fieldset><legend>${label}${same}</legend>
       <div class="grid g2">
-        <div><label>Check-in</label><input type="date" class="ci" data-i="${i}" min="${DB.rules.eventStart}" max="${DB.rules.eventEnd}" value="${prevCi[i]||''}" onchange="syncDates(${i})"></div>
+        <div><label>Check-in</label><input type="date" class="ci" data-i="${i}" min="${DB.rules.eventStart}" max="${prevDay(DB.rules.eventEnd)}" value="${prevCi[i]||''}" onchange="syncDates(${i})"></div>
         <div><label>Check-out</label><input type="date" class="co" data-i="${i}" min="${prevCi[i]||DB.rules.eventStart}" max="${DB.rules.eventEnd}" value="${prevCo[i]||''}" onchange="syncDates(${i})"></div>
       </div>
       <label style="display:flex;gap:8px;align-items:center;margin-top:10px;font-size:14px;color:var(--muted);font-weight:600">
@@ -953,7 +953,7 @@ function submitReq(){
   for(let i=0;i<stays.length;i++){ const s=stays[i];
     if(!s.checkin||!s.checkout){ toast('Fill dates for room '+(i+1)); return; }
     if(s.checkout<=s.checkin){ toast('Room '+(i+1)+': check-out must be after check-in'); return; }
-    if(s.checkin<DB.rules.eventStart || s.checkout>DB.rules.eventEnd){ toast('Dates must be within the festival window: '+fmtD(DB.rules.eventStart)+' to '+fmtD(DB.rules.eventEnd)); return; } }
+    if(s.checkin<DB.rules.eventStart || s.checkin>=DB.rules.eventEnd || s.checkout>DB.rules.eventEnd){ toast('Check-in must be between '+fmtD(DB.rules.eventStart)+' and '+fmtD(prevDay(DB.rules.eventEnd))+', and check-out by '+fmtD(DB.rules.eventEnd)); return; } }
   const rooms=Math.max(1,parseInt($('#reqRooms').value)||1);
   const data={head:head,phone:phoneDigits,guestType:guestType,accompanying:total-1,count:total,family:total>1,preferred:pref,
     donation:Number($('#reqDonation').value)||0,receipt:receipt,
