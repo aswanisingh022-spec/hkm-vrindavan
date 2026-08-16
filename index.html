@@ -391,7 +391,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b55';
+const APP_BUILD='2026-08-16-b56';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -858,7 +858,7 @@ function viewNewReq(){
         </select></div>
       <div><label>Donation amount (₹)</label><input id="reqDonation" type="number" min="0" placeholder="0" oninput="syncSevaPlan()" onchange="syncSevaPlan()"></div>
     </div>
-    <div><label>Donation receipt number <span id="rcpStar" style="color:var(--red)">*</span></label><input id="reqReceipt" placeholder="e.g. RCP-12345"></div>
+    <div><label>Donation receipt number <span id="rcpStar" style="color:var(--red)">*</span></label><input id="reqReceipt" placeholder="e.g. HKMV-12345" oninput="checkReceipt()" onblur="checkReceipt()"><p id="rcpMsg" class="rooms-mini" style="margin:4px 0 0;color:var(--red);display:none">⚠ Please enter a correct receipt number</p></div>
     <p class="rooms-mini" id="typeNote" style="margin:4px 0 0">FR Guest — donation receipt number is required.</p>
     <div id="sevaPlanWrap" style="margin-top:10px;background:#f6efe2;border:1px dashed var(--line);border-radius:10px;padding:10px 14px">
       <label style="margin-top:0">💰 Who will collect the room seva / payment?</label>
@@ -934,6 +934,15 @@ function syncDates(i){
 /* FOC gating: donation ≥ freeMin → FOC option enabled & auto-picked (devotee may change);
    donation < freeMin → FOC disabled and cannot be selected (fall back to Devotee). */
 function sevaTouched(){ const sel=$('#reqSevaPlan'); if(sel) sel.dataset.userTouched='1'; }
+/* Live receipt check while typing: flags only when the entry can no longer become a valid
+   HKMV… / VCMT… number (case-insensitive, spaces ignored). Empty = no warning. */
+function checkReceipt(){
+  const el=$('#reqReceipt'); if(!el) return; const msg=$('#rcpMsg');
+  const n=(el.value||'').replace(/\s+/g,'').toUpperCase();
+  const ok = n==='' || 'HKMV'.startsWith(n) || 'VCMT'.startsWith(n) || n.startsWith('HKMV') || n.startsWith('VCMT');
+  el.style.borderColor = ok ? '' : 'var(--red)';
+  if(msg) msg.style.display = ok ? 'none' : 'block';
+}
 function syncSevaPlan(){
   const sel=$('#reqSevaPlan'); if(!sel) return;
   const amt=Math.max(0, Number(($('#reqDonation')||{}).value)||0);
@@ -2007,7 +2016,7 @@ function viewLogins(){
 
 /* init total line after render */
 const _origRender=render;
-render=function(){ _origRender(); if(currentTab==='newreq'){ updateSummary(); renderDateRows(); prefillEdit(); updateTypeUI(); syncSevaPlan(); }
+render=function(){ _origRender(); if(currentTab==='newreq'){ updateSummary(); renderDateRows(); prefillEdit(); updateTypeUI(); syncSevaPlan(); checkReceipt(); }
   reapplySearches();
   if(USER&&(USER.role==='admin'||USER.role==='vcm')) updateNotifBadge(); };
 function updateNotifBadge(){ const n=DB.notifications.filter(x=>!x.ack).length; const el=$('#notifBadge');
