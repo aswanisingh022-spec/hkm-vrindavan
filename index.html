@@ -391,7 +391,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-15-b48';
+const APP_BUILD='2026-08-16-b49';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -727,13 +727,13 @@ window.addEventListener('visibilitychange', function(){ if(document.visibilitySt
 /* ---------------- Navigation ---------------- */
 let currentTab='';
 function buildTabs(){
-  const adminTabs=[['dash','📊 Dashboard'],['requests','🆕 Requests'],['booked','✅ Booked'],['receipts','🧾 Receipts'],['seva','💰 To collect'],['collections','💰 Payments'],['braj','🏠 Braj Nidhi'],['report','📥 Report'],['notifs','🔔 Alerts<span id="notifBadge" class="tabbadge"></span>'],['hotels','🏨 Hotels'],['vacancy','🛏️ Vacancy']];
+  const adminTabs=[['dash','📊 Dashboard'],['requests','🆕 Requests'],['booked','✅ Booked'],['receipts','🧾 Receipts'],['seva','💰 To collect'],['collections','💰 Payments'],['braj','🏠 Braj Nidhi'],['report','📥 Report'],['notifs','🔔 Alerts<span id="notifBadge" class="tabbadge"></span>'],['hotels','🏨 Hotels'],['vacancy','🛏️ Vacancy'],['contacts','📇 Devotee Contact']];
   const tabs = USER.role==='admin'
     ? [...adminTabs,['donations','🧾 Donations'],['logins','🔑 Logins'],['exports','📥 Excel'],['settings','⚙️ Settings']]
     : USER.role==='vcm'
     ? adminTabs
     : USER.role==='staff'
-    ? [['dash','📊 Dashboard'],['seva','💰 To collect'],['rooms','🛏️ Room Allocations'],['vacancy','🪟 Vacancy']]
+    ? [['dash','📊 Dashboard'],['seva','💰 To collect'],['rooms','🛏️ Room Allocations'],['vacancy','🪟 Vacancy'],['contacts','📇 Devotee Contact']]
     : [['newreq','➕ New Request'],['myreq','📋 My Requests']];
   $('#tabs').innerHTML = tabs.map(([k,l])=>`<div class="tab" data-k="${k}" onclick="go('${k}')">${l}</div>`).join('');
   go(tabs[0][0]);
@@ -753,6 +753,7 @@ function render(){
     if(currentTab==='notifs') b.innerHTML=viewNotifications();
     if(currentTab==='hotels') b.innerHTML=viewHotels();
     if(currentTab==='vacancy') b.innerHTML=viewVacancy();
+    if(currentTab==='contacts') b.innerHTML=viewContacts();
     if(currentTab==='donations') b.innerHTML= isSuper()?viewDonations():'';
     if(currentTab==='logins') b.innerHTML= isSuper()?viewLogins():'';
     if(currentTab==='exports') b.innerHTML= isSuper()?viewExports():'';
@@ -762,12 +763,34 @@ function render(){
     if(currentTab==='seva') b.innerHTML=viewSevaCollect();
     if(currentTab==='rooms') b.innerHTML=viewStaffRooms();
     if(currentTab==='vacancy') b.innerHTML=viewStaffVacancy();
+    if(currentTab==='contacts') b.innerHTML=viewContacts();
   } else {
     if(currentTab==='newreq') b.innerHTML=viewNewReq();
     if(currentTab==='myreq') b.innerHTML=viewMyReq();
   }
 }
 /* ---------------- Staff (view only) ---------------- */
+/* ---------------- Devotee Contact directory (Super Admin, VCM, Staff) ---------------- */
+function locName(c){ return {GGN:'Gurugram',NOI:'Noida',VRN:'Vrindavan'}[c]||c; }
+function viewContacts(){
+  const list=(DB.rules&&DB.rules.contacts)||[];
+  const rows=list.map(c=>{
+    const phone=c.phone?`<a href="tel:${esc(c.phone)}" style="color:var(--saffron-dark);font-weight:600;text-decoration:none">📞 ${esc(c.phone)}</a>`:'<span class="muted">—</span>';
+    const email=c.email?`<a href="mailto:${esc(c.email)}" style="color:var(--saffron-dark);text-decoration:none">${esc(c.email)}</a>`:'<span class="muted">—</span>';
+    return `<tr data-search="${esc(((c.name||'')+' '+(c.code||'')+' '+(c.phone||'')+' '+(c.email||'')+' '+(c.location||'')+' '+locName(c.location||'')).toLowerCase())}">
+      <td data-label="Name"><b>${esc(c.name||'')}</b></td>
+      <td data-label="Short form">${c.code?`<span class="pill p-waitlist">${esc(c.code)}</span>`:'<span class="muted">—</span>'}</td>
+      <td data-label="Location">${c.location?esc(locName(c.location))+' <span class="muted">('+esc(c.location)+')</span>':'<span class="muted">—</span>'}</td>
+      <td data-label="Phone">${phone}</td>
+      <td data-label="Email">${email}</td></tr>`; }).join('')
+    || '<tr><td colspan="5" class="muted">No contacts added yet.</td></tr>';
+  return `<div class="card"><h2 class="section">📇 Devotee Contact <span class="pill p-confirmed">${list.length}</span></h2>
+    <p class="subhead">Preacher / devotee directory — name, short form, location, phone and email. Tap a number to call, tap an email to write.</p>
+    <input placeholder="🔍 Search name, short form, phone, email or location" value="${esc(searchQ['contactRows']||'')}" oninput="setSearch('contactRows',this.value)" style="margin-bottom:10px;max-width:440px">
+    <div class="scrollx"><table class="stack-mobile"><thead><tr><th>Name</th><th>Short form</th><th>Location</th><th>Phone</th><th>Email</th></tr></thead>
+      <tbody id="contactRows">${rows}</tbody></table></div></div>`;
+}
+
 let staffHotel='all';
 function setStaffHotel(v){ staffHotel=v; render(); }
 function filterStaffRows(q){ q=(q||'').toLowerCase().trim();
