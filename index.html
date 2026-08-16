@@ -391,7 +391,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b52';
+const APP_BUILD='2026-08-16-b53';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -965,7 +965,7 @@ function submitReq(){
   const guestType=($('#reqType')||{}).value||'FR';
   const receipt=$('#reqReceipt').value.trim();
   if(guestType==='FR' && !receipt){ toast('Donation receipt number is required for an FR Guest'); return; }
-  if(receipt && !/^(HMKV|VCMT).+/i.test(receipt)){ toast('Receipt number must start with HMKV or VCMT — e.g. HMKV-12345 or VCMT-678737'); return; }
+  if(receipt && !/^(HMKV|VCMT).+/i.test(receipt)){ toast('Invalid receipt number — please enter the correct number'); return; }
   const phoneDigits=($('#reqPhone').value||'').replace(/\D/g,'');
   if(phoneDigits && phoneDigits.length!==10){ toast('Guest mobile number must be exactly 10 digits'); return; }
   if(receipt){ const rNorm=receipt.toLowerCase(); const dup=DB.bookings.find(x=>x.id!==editingId && x.status!=='cancelled' && x.status!=='withdrawn' && (x.receipt||'').trim().toLowerCase()===rNorm);
