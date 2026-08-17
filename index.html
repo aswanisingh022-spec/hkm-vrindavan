@@ -391,7 +391,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b60';
+const APP_BUILD='2026-08-16-b61';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -866,6 +866,7 @@ function viewNewReq(){
         <option value="devotee">I (Devotee) will collect / arrange the seva</option>
         <option value="staff">Staff will collect the seva</option>
         <option value="foc">FOC — Free of cost (donation ₹50,000 &amp; above)</option>
+        <option value="kind">Kind Donor</option>
       </select>
       <p class="rooms-mini" id="sevaPlanNote" style="margin:4px 0 0">Donation ₹50,000 or above → <b>FOC (free of cost)</b> is auto-selected; you may change it. Below ₹50,000 → FOC is not available; choose Devotee or Staff. This shows up for Staff, VCM Guest House and Super Admin.</p></div>
     <p class="rooms-mini" style="margin:10px 0 0;color:var(--saffron-dark)">🎪 Festival stay only — check in between ${fmtD(DB.rules.eventStart)} and ${fmtD(prevDay(DB.rules.eventEnd))}, and check out by ${fmtD(DB.rules.eventEnd)} ${DB.rules.eventStart.slice(0,4)}.</p>
@@ -973,8 +974,9 @@ function submitReq(){
   const total=Math.max(1,parseInt($('#reqTotal').value)||1);
   const guestType=($('#reqType')||{}).value||'FR';
   const receipt=$('#reqReceipt').value.trim();
-  if(guestType==='FR' && !receipt){ toast('Donation receipt number is required for an FR Guest'); return; }
-  if(receipt){ const rClean=receipt.replace(/\s+/g,'').toUpperCase(); if(!/^(HKMV|VCMT).+/.test(rClean)){ toast('Invalid receipt number — please enter the correct number'); return; } }
+  const isKindDonor=(($('#reqSevaPlan')||{}).value)==='kind';
+  if(guestType==='FR' && !receipt && !isKindDonor){ toast('Donation receipt number is required for an FR Guest'); return; }
+  if(receipt && !isKindDonor){ const rClean=receipt.replace(/\s+/g,'').toUpperCase(); if(!/^(HKMV|VCMT).+/.test(rClean)){ toast('Invalid receipt number — please enter the correct number'); return; } }
   const phoneDigits=($('#reqPhone').value||'').replace(/\D/g,'');
   if(phoneDigits && phoneDigits.length!==10){ toast('Guest mobile number must be exactly 10 digits'); return; }
   if(receipt){ const rNorm=receipt.toLowerCase(); const dup=DB.bookings.find(x=>x.id!==editingId && x.status!=='cancelled' && x.status!=='withdrawn' && (x.receipt||'').trim().toLowerCase()===rNorm);
@@ -1461,9 +1463,10 @@ function devoteeStatusPill(b){
     ? `<div class="rooms-mini" style="margin-top:4px;color:var(--amber);background:#fdf0dc;border:1px solid #f0d9b0;border-radius:8px;padding:4px 8px">🕓 Currently full — on the waiting list. A room may open if a guest doesn\'t arrive; you can also contact the guest house team.</div>`
     : '';
   const note=guaranteeNote(b);
-  const core = note
-    ? '<span class="pill p-confirmed">Confirmed</span><div class="rooms-mini" style="margin-top:3px">'+note+'</div>'
-    : '<span class="pill p-pending">Pending</span>';
+  let core;
+  if(note) core='<span class="pill p-confirmed">Confirmed</span><div class="rooms-mini" style="margin-top:3px">'+note+'</div>';
+  else if(b.sevaPlan==='kind') core='<span class="pill p-pending">Pending</span><div class="rooms-mini" style="margin-top:3px">In case of an important guest, contact concerned devotee</div>';
+  else core='<span class="pill p-pending">Pending</span>';
   return core + waitNote; }
 /* accommodation payment status shown to the devotee */
 function sevaLabel(b){
