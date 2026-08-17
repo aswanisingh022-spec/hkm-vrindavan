@@ -391,7 +391,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b64';
+const APP_BUILD='2026-08-16-b65';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -1511,8 +1511,10 @@ function approveNoReceipt(id){ if(!isSuper()){ toast('Only the Super Admin can c
 function approve(id,skipReceipt){ const b=DB.bookings.find(x=>x.id===id); if(!b)return;
   const h=DB.hotels.find(x=>x.id===b.hotel);
   if(!h||!b.roomType||!b.rooms){ toast('Pick a hotel, room type and at least 1 room first'); return; }
-  const needsReceipt=(b.guestType||'FR')==='FR';   // PR / Media / Volunteer don't need a receipt
-  if(!needsReceipt && !isSuper()){ toast((b.guestType)+' bookings can only be confirmed by the Super Admin'); return; }
+  const gt=(b.guestType||'FR');
+  const isKindNoReceipt=(b.sevaPlan==='kind' && !b.receipt);   // Kind Donor without a receipt — no verification needed
+  const needsReceipt=(gt==='FR') && !isKindNoReceipt;   // PR / Media / Volunteer and Kind Donors (no receipt) don't need a verified receipt
+  if(gt!=='FR' && !isSuper()){ toast((b.guestType)+' bookings can only be confirmed by the Super Admin'); return; }
   if(needsReceipt && !skipReceipt && !b.donationVerified){ toast(b.receiptWrong?'Receipt is marked WRONG — devotee must correct it (or use “Confirm without receipt”)':'Cannot confirm — verify the donation receipt first in the 🧾 Receipts panel'); return; }
   b.confirmedWithoutReceipt = !!(skipReceipt && needsReceipt && !b.donationVerified);
   const roomObj=h.rooms.find(r=>r.type===b.roomType);
