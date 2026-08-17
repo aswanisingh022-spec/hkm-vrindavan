@@ -391,7 +391,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b63';
+const APP_BUILD='2026-08-16-b64';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -425,7 +425,11 @@ function catBadge(b){ const c=guestCategory(b); return `<span class="pill ${catC
 /* what to show for a donation: Super Admin sees the amount, VCM sees only the category */
 function donDisplay(b){ return seeMoney()? money(b.donation) : catBadge(b); }
 /* receipt sub-line: Super Admin sees the receipt number; VCM sees only verified/unverified (no number, no amount) */
-function donSub(b){ if(seeMoney()) return b.donationVerified?'✅ receipt verified':(b.receipt?'📎 '+esc(b.receipt)+' (unverified)':'⚠️ no receipt');
+function donSub(b){
+  const gt=b.guestType||'FR';
+  if(gt!=='FR') return '<span style="color:var(--saffron-dark);font-weight:700">🎫 '+esc(gt)+' guest</span>';   // PR / Media / Volunteer — no receipt expected
+  if(b.sevaPlan==='kind' && !b.receipt) return '<span style="color:var(--saffron-dark);font-weight:700">🤝 Kind donor</span>';   // helping the temple — shown in place of receipt
+  if(seeMoney()) return b.donationVerified?'✅ receipt verified':(b.receipt?'📎 '+esc(b.receipt)+' (unverified)':'⚠️ no receipt');
   return b.donationVerified?'✅ receipt verified':'⚠ receipt unverified'; }
 function notify(kind,msg,brahmachari,bookingId){ const n={id:uid('n'),ts:Date.now(),kind,msg,brahmachari:brahmachari||'',bookingId:bookingId||'',ack:false}; DB.notifications.unshift(n); if(USER){ sb.from('notifications').insert({id:n.id,data:n,ack:false,ts:new Date(n.ts).toISOString()}).then(()=>{},()=>{}); } save(); }
 
