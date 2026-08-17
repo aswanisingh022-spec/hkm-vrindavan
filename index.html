@@ -391,7 +391,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b62';
+const APP_BUILD='2026-08-16-b63';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -918,8 +918,8 @@ function renderDateRows(){ const c=$('#dateRows'); if(!c) return;
         <div><label>Check-in</label><input type="date" class="ci" data-i="${i}" min="${DB.rules.eventStart}" max="${prevDay(DB.rules.eventEnd)}" value="${prevCi[i]||''}" onchange="syncDates(${i})"></div>
         <div><label>Check-out</label><input type="date" class="co" data-i="${i}" min="${prevCi[i]||DB.rules.eventStart}" max="${DB.rules.eventEnd}" value="${prevCo[i]||''}" onchange="syncDates(${i})"></div>
       </div>
-      <label style="display:flex;gap:8px;align-items:center;margin-top:10px;font-size:14px;color:var(--muted);font-weight:600">
-        <input type="checkbox" class="exBed" data-i="${i}" style="width:auto" ${prevEx[i]?'checked':''}> 🛏️ Need an extra bed in this room? <span style="font-weight:400">(for a child / same family — 1 max)</span></label>
+      <label style="display:flex;gap:8px;align-items:center;margin-top:10px;font-size:14px;color:var(--red);font-weight:700">
+        <input type="checkbox" class="exBed" data-i="${i}" style="width:auto;accent-color:var(--red)" ${prevEx[i]?'checked':''}> 🛏️ Need an extra bed in this room? <span style="font-weight:400;color:var(--red)">(for a child / same family — 1 max)</span></label>
       </fieldset>`;
   }
   c.innerHTML=html;
