@@ -391,7 +391,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b58';
+const APP_BUILD='2026-08-16-b59';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -1522,7 +1522,7 @@ function approve(id,skipReceipt){ const b=DB.bookings.find(x=>x.id===id); if(!b)
   const extraMsg=(b.extraBeds||0)>0?` + ${b.extraBeds} extra bed`:'';
   const cts=hotelSendContacts(h.id);
   const ctMsg=cts.length?' · contact '+cts.map(c=>c.name+' '+c.phone).join(', '):'';
-  toast('✓ Confirmed: '+h.name+' · '+b.roomType+' × '+b.rooms+extraMsg+ctMsg+' — email sent to '+b.brahmachari); }
+  toast('✓ Confirmed: '+h.name+' · '+b.roomType+' × '+b.rooms+extraMsg+ctMsg+" — Confirmation updated on devotee's portal"); }
 function setStatus(id,s){ const b=DB.bookings.find(x=>x.id===id); if(!b)return; b.status=s; save(); render();
   toast('Status: '+s+' — notification sent'); }
 
@@ -1580,12 +1580,12 @@ function viewHotels(){
         <button class="btn sm" onclick="addRoom('${h.id}')">+ Add room type</button>
       </div>
       <div style="margin-top:14px">
-        <div class="rooms-mini" style="font-weight:700;margin-bottom:4px">📞 Contact persons <span class="muted">— tick up to 2 to include in the guest's confirmation email</span></div>
+        <div class="rooms-mini" style="font-weight:700;margin-bottom:4px">📞 Contact persons <span class="muted">— tick up to 2 to show the guest on their confirmation</span></div>
         ${(h.contacts&&h.contacts.length)?h.contacts.map((c,i)=>`<div class="flex" style="gap:8px;padding:4px 0;flex-wrap:nowrap">
             <input type="checkbox" style="width:auto" ${c.send?'checked':''} onchange="toggleContactSend('${h.id}',${i})">
             <b style="min-width:120px">${esc(c.name)}</b>
             <span class="muted" style="flex:1">${esc(c.phone)}</span>
-            ${c.send?'<span class="pill p-confirmed">in email</span>':''}
+            ${c.send?'<span class="pill p-confirmed">shown to guest</span>':''}
             <button class="btn red sm" onclick="delContact('${h.id}',${i})">✕</button></div>`).join('')
           :'<span class="muted">No contacts yet</span>'}
         <div class="flex" style="margin-top:8px">
@@ -1660,7 +1660,7 @@ function addContact(id){ const h=DB.hotels.find(x=>x.id===id); if(!h.contacts)h.
   h.contacts.push({name:n,phone:p,send:h.contacts.filter(c=>c.send).length<2}); save(); render(); }
 function delContact(id,i){ const h=DB.hotels.find(x=>x.id===id); h.contacts.splice(i,1); save(); render(); }
 function toggleContactSend(id,i){ const h=DB.hotels.find(x=>x.id===id); const c=h.contacts[i];
-  if(!c.send && h.contacts.filter(x=>x.send).length>=2){ toast('You can select a maximum of 2 contacts for the email'); render(); return; }
+  if(!c.send && h.contacts.filter(x=>x.send).length>=2){ toast('You can select a maximum of 2 contacts'); render(); return; }
   c.send=!c.send; save(); render(); }
 
 /* ---------------- Admin: Vacancy & Unassigned ---------------- */
