@@ -391,7 +391,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b59';
+const APP_BUILD='2026-08-16-b60';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -1439,19 +1439,19 @@ function setSevaChannel(id,v){ const b=DB.bookings.find(x=>x.id===id); if(!b)ret
 /* Status shown to the devotee. A ₹50k+ donor (once receipt verified) is assured — status shows Confirmed
    even while the actual room/location is still being allocated. Location appears only after allocation. */
 /* How many rooms a donation guarantees (rest depend on availability):
-   ₹11L+ → 3 · ₹5L+ → 2 · ₹2.5L+/₹1L+/₹51k+ → 1 · below ₹51k → 0 (no guarantee). */
+   ₹11L+ → 3 · ₹5L+ → 2 · ₹2.5L+/₹1L+/₹50k+ → 1 · below ₹50k → 0 (no guarantee). */
 function guaranteedRooms(donation){
   const d=Number(donation)||0;
   if(d>=1100000) return 3;
   if(d>=500000) return 2;
-  if(d>=51000) return 1;
+  if(d>=50000) return 1;
   return 0;
 }
 /* Devotee-facing status text based on donation tier and rooms requested. */
 function guaranteeNote(b){
   const R=Math.max(1, b.roomsRequested||1), G=guaranteedRooms(b.donation);
   if(G<1) return '';
-  return R>G ? `${G} room${G>1?'s':''} confirmed · others depend on availability`
+  return R>G ? `${G} room${G>1?'s':''} confirmed · others depend on availability or contact concerned devotee`
              : `${Math.min(R,G)} room${Math.min(R,G)>1?'s':''} confirmed`;
 }
 function devoteeStatusPill(b){
