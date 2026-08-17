@@ -391,7 +391,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b57';
+const APP_BUILD='2026-08-16-b58';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -1028,8 +1028,9 @@ function guestReopen(id){ const b=DB.bookings.find(x=>x.id===id); if(!b)return;
 async function shareRequest(id){
   const b=DB.bookings.find(x=>x.id===id); if(!b){ toast('Request not found'); return; }
   if(typeof html2canvas!=='function'){ toast('Image tool still loading — try again in a moment'); return; }
+  const gNote = guaranteeNote(b);
   const statusTxt = b.status==='confirmed' ? 'Confirmed ✅'
-    : ((b.donation||0)>=(DB.rules.freeMin||50000) ? 'Confirmed — room assured ✅' : 'Pending');
+    : (gNote ? gNote : 'Pending');
   const locTxt = b.status==='confirmed' ? (hotelName(b.hotel)+(b.roomType?(' · '+b.roomType+(b.rooms>1?(' × '+b.rooms):'')):'')) : 'To be allocated';
   const row=(k,v)=>`<tr><td style="color:#7a6a58;padding:5px 0;font-size:13px">${k}</td><td style="text-align:right;font-weight:700;padding:5px 0;font-size:13px">${esc(v)}</td></tr>`;
   const card=document.createElement('div');
@@ -1437,14 +1438,33 @@ function setSevaChannel(id,v){ const b=DB.bookings.find(x=>x.id===id); if(!b)ret
   if(v) toast('Seva marked received by '+(v==='GPP'?"GPP's Team (Staff)":'Devotee')); }
 /* Status shown to the devotee. A ₹50k+ donor (once receipt verified) is assured — status shows Confirmed
    even while the actual room/location is still being allocated. Location appears only after allocation. */
+/* How many rooms a donation guarantees (rest depend on availability):
+   ₹11L+ → 3 · ₹5L+ → 2 · ₹2.5L+/₹1L+/₹51k+ → 1 · below ₹51k → 0 (no guarantee). */
+function guaranteedRooms(donation){
+  const d=Number(donation)||0;
+  if(d>=1100000) return 3;
+  if(d>=500000) return 2;
+  if(d>=51000) return 1;
+  return 0;
+}
+/* Devotee-facing status text based on donation tier and rooms requested. */
+function guaranteeNote(b){
+  const R=Math.max(1, b.roomsRequested||1), G=guaranteedRooms(b.donation);
+  if(G<1) return '';
+  return R>G ? `${G} room${G>1?'s':''} confirmed · others depend on availability`
+             : `${Math.min(R,G)} room${Math.min(R,G)>1?'s':''} confirmed`;
+}
 function devoteeStatusPill(b){
   if(b.status==='confirmed') return '<span class="pill p-confirmed">Confirmed</span>';
   if(b.status==='cancelled'||b.status==='withdrawn'||b.status==='rejected') return statusPill(b.status);
   const waitNote = (b.bookedWhenFull && !b.hotel)
     ? `<div class="rooms-mini" style="margin-top:4px;color:var(--amber);background:#fdf0dc;border:1px solid #f0d9b0;border-radius:8px;padding:4px 8px">🕓 Currently full — on the waiting list. A room may open if a guest doesn\'t arrive; you can also contact the guest house team.</div>`
     : '';
-  const assured=(b.donation>=DB.rules.freeMin);   // ₹50k+ → accommodation assured immediately (location shared later)
-  return (assured ? '<span class="pill p-confirmed">Confirmed</span><div class="rooms-mini" style="margin-top:3px">room assured</div>' : '<span class="pill p-pending">Pending</span>') + waitNote; }
+  const note=guaranteeNote(b);
+  const core = note
+    ? '<span class="pill p-confirmed">Confirmed</span><div class="rooms-mini" style="margin-top:3px">'+note+'</div>'
+    : '<span class="pill p-pending">Pending</span>';
+  return core + waitNote; }
 /* accommodation payment status shown to the devotee */
 function sevaLabel(b){
   if((b.guestType||'FR')!=='FR') return `<span class="pill p-confirmed">🎫 ${esc(b.guestType)}</span>`;   // PR / Media / Volunteer: no seva prompt
