@@ -391,7 +391,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b66';
+const APP_BUILD='2026-08-16-b67';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -638,7 +638,7 @@ function buildPlans(b,allowExtra){
   const catList = typed ? DB.rules.guestTypeHotels[gt] : (DB.rules.categoryHotels[cat]||[]);  // suggested hotel(s)
   const reserved=reservedHotelIds();                         // D1-only hotels — never for D2/D3
   // Is any ordinary (non-reserved, non-manual) guest house available to START this stay (open on check-in night)?
-  const openGeneralExists=DB.hotels.some(h=> h.active && !h.manualOnly && !reserved.includes(h.id)
+  const openGeneralExists=DB.hotels.some(h=> h.active && !h.manualOnly && !h.volunteerOnly && !reserved.includes(h.id)
       && hotelOriginEnd(h,b.checkin,b.checkout)!==null
       && b.donation>=(h.minDonation||0));
   const plans=[];
@@ -646,6 +646,7 @@ function buildPlans(b,allowExtra){
       if(h.manualOnly) return false;                          // never auto-suggested (e.g. Madhav Kutir) — Super Admin assigns manually
       if(hotelOriginEnd(h,b.checkin,b.checkout)===null) return false;  // hotel not open on the check-in night → can't start the stay here
       if(typed) return catList.includes(h.id);                // PR/Media/Volunteer → only their fixed hotel, donation gate bypassed
+      if(h.volunteerOnly) return false;                       // Ved Vihari is reserved for Volunteers only — never suggested to FR / PR / Media / Kind Donor
       if(!openGeneralExists) return h.id==='h1';               // no other hotel can start these dates → offer ONLY Braj Nidhi, to every guest (bypass reserve + min gates)
       if(b.donation<(h.minDonation||0)) return false;         // FR hotel eligibility gate
       if(cat!=='D1' && reserved.includes(h.id)) return false; // reserved hotels only for D1
