@@ -391,7 +391,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b65';
+const APP_BUILD='2026-08-16-b66';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -1731,6 +1731,18 @@ function exportByAmount(){ const wb=XLSX.utils.book_new();
   buckets.forEach(([label,lo,hi])=>{ const rows=DB.bookings.filter(b=>(b.donation||0)>=lo&&(b.donation||0)<hi).map(bookingRow);
     XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(rows.length?rows:[{Note:'No bookings in this range'}]),label); });
   dl(wb,'HKM_by_amount_range.xlsx'); }
+function exportKindDonors(){ if(typeof XLSX==='undefined'){ toast('Excel library still loading — try again'); return; }
+  const rows=DB.bookings.filter(b=>b.sevaPlan==='kind').map(b=>({
+    'Devotee':devoteeName(b), 'Head of Family':b.head||'', 'Guest Mobile':b.phone||'',
+    'Total People':b.count, 'Donation (₹)':b.donation||0, 'Amount Given':((b.donation||0)>0?'Yes':'No'),
+    'Guest Type':b.guestType||'FR', 'Status':b.status,
+    'Hotel':b.hotel?hotelName(b.hotel):'', 'Room Type':b.roomType||'', 'Rooms':b.rooms||0,
+    'Separate Rooms Requested':b.roomsRequested||0,
+    'Check-in':b.checkin||'', 'Check-out':b.checkout||'', 'Note':b.note||'' }));
+  if(!rows.length){ toast('No kind donors yet'); return; }
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Kind Donors');
+  dl(wb,'HKM_kind_donors.xlsx'); }
 function viewExports(){
   return `<div class="card"><h2 class="section">📥 Download Lists as Excel</h2>
     <p class="subhead">Each download opens directly in Microsoft Excel / Google Sheets.</p>
@@ -1743,6 +1755,8 @@ function viewExports(){
         <button class="btn" onclick="exportByBrahmachari()">Download by Devotee</button></div>
       <div class="stat"><b>Donation amount range</b><p class="muted" style="margin:6px 0 10px">Grouped: &lt;25k, 25k–1L, 1L–2.5L, 2.5L+.</p>
         <button class="btn" onclick="exportByAmount()">Download by amount</button></div>
+      <div class="stat"><b>🤝 Kind Donors</b><p class="muted" style="margin:6px 0 10px">All devotees marked as Kind Donor.</p>
+        <button class="btn" onclick="exportKindDonors()">Download Kind Donors</button></div>
     </div></div>`;
 }
 
