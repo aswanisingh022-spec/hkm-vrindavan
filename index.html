@@ -391,7 +391,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b68';
+const APP_BUILD='2026-08-16-b69';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -865,7 +865,7 @@ function viewNewReq(){
     </div>
     <div><label>Donation receipt number <span id="rcpStar" style="color:var(--red)">*</span></label><input id="reqReceipt" placeholder="Enter donation receipt number" oninput="checkReceipt()" onblur="checkReceipt()"><p id="rcpMsg" class="rooms-mini" style="margin:4px 0 0;color:var(--red);display:none">⚠ Please enter a correct receipt number</p></div>
     <p class="rooms-mini" id="typeNote" style="margin:4px 0 0">FR Guest — donation receipt number is required.</p>
-    <div style="margin:10px 0 0;background:#fdecec;border:1px solid #f3c2c2;border-radius:9px;padding:9px 13px;font-size:13px;color:var(--red);font-weight:600">⚠ The booking name must match the name on the receipt and Aadhaar card; for receipts issued in a company's name, the Booking Team will decide accordingly.</div>
+    <div style="margin:10px 0 0;background:#fdecec;border:1px solid #f3c2c2;border-radius:9px;padding:9px 13px;font-size:13px;color:var(--red);font-weight:600">⚠ Note: Aadhaar verification will be required at the time of check-in to confirm the booking details.</div>
     <div id="sevaPlanWrap" style="margin-top:10px;background:#f6efe2;border:1px dashed var(--line);border-radius:10px;padding:10px 14px">
       <label style="margin-top:0">💰 Who will collect the room seva / payment?</label>
       <select id="reqSevaPlan" onchange="sevaTouched()">
