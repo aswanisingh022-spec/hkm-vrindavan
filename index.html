@@ -391,7 +391,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b69';
+const APP_BUILD='2026-08-16-b70';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -843,6 +843,7 @@ function viewNewReq(){
   return `<div class="card">
     <h2 class="section">${editing?'✏️ Edit Request':'➕ New Accommodation Request'}</h2>
     <p class="subhead">${editing?'Update your request below and press Update. The admin will see it was edited.':'Note: One request per family. Enter the name of the head of the family and the total number of people. Please mention any Guest house preference or special requirements in the Notes section. The admin will decide and allocate the guest house based on availability.'}</p>
+    <div style="margin:0 0 14px;background:#fdecec;border:1px solid #f3c2c2;border-radius:9px;padding:10px 14px;font-size:14px;color:var(--red);font-weight:700">⚠ Note: Aadhaar verification will be required at the time of check-in to confirm the booking details.</div>
     <div class="grid g2">
       <div><label>Head of family (name)</label><input id="reqHead" placeholder="e.g. Raj Sharma"></div>
       <div><label>Guest mobile number</label><input id="reqPhone" type="tel" inputmode="numeric" maxlength="10" oninput="this.value=this.value.replace(/[^0-9]/g,'').slice(0,10)" placeholder="10-digit mobile number"><div class="rooms-mini">Must be exactly 10 digits</div></div>
@@ -865,7 +866,6 @@ function viewNewReq(){
     </div>
     <div><label>Donation receipt number <span id="rcpStar" style="color:var(--red)">*</span></label><input id="reqReceipt" placeholder="Enter donation receipt number" oninput="checkReceipt()" onblur="checkReceipt()"><p id="rcpMsg" class="rooms-mini" style="margin:4px 0 0;color:var(--red);display:none">⚠ Please enter a correct receipt number</p></div>
     <p class="rooms-mini" id="typeNote" style="margin:4px 0 0">FR Guest — donation receipt number is required.</p>
-    <div style="margin:10px 0 0;background:#fdecec;border:1px solid #f3c2c2;border-radius:9px;padding:9px 13px;font-size:13px;color:var(--red);font-weight:600">⚠ Note: Aadhaar verification will be required at the time of check-in to confirm the booking details.</div>
     <div id="sevaPlanWrap" style="margin-top:10px;background:#f6efe2;border:1px dashed var(--line);border-radius:10px;padding:10px 14px">
       <label style="margin-top:0">💰 Who will collect the room seva / payment?</label>
       <select id="reqSevaPlan" onchange="sevaTouched()">
