@@ -391,7 +391,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b70';
+const APP_BUILD='2026-08-16-b71';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -1037,9 +1037,10 @@ async function shareRequest(id){
   const b=DB.bookings.find(x=>x.id===id); if(!b){ toast('Request not found'); return; }
   if(typeof html2canvas!=='function'){ toast('Image tool still loading — try again in a moment'); return; }
   const gNote = guaranteeNote(b);
-  const statusTxt = b.status==='confirmed' ? 'Confirmed ✅'
-    : (gNote ? gNote : 'Pending');
-  const locTxt = b.status==='confirmed' ? (hotelName(b.hotel)+(b.roomType?(' · '+b.roomType+(b.rooms>1?(' × '+b.rooms):'')):'')) : 'To be allocated';
+  const _rev = locRevealed(b);
+  const statusTxt = !_rev ? 'Pending' : (b.status==='confirmed' ? 'Confirmed ✅'
+    : (gNote ? gNote : 'Pending'));
+  const locTxt = (_rev && b.status==='confirmed') ? (hotelName(b.hotel)+(b.roomType?(' · '+b.roomType+(b.rooms>1?(' × '+b.rooms):'')):'')) : 'To be allocated';
   const row=(k,v)=>`<tr><td style="color:#7a6a58;padding:5px 0;font-size:13px">${k}</td><td style="text-align:right;font-weight:700;padding:5px 0;font-size:13px">${esc(v)}</td></tr>`;
   const card=document.createElement('div');
   card.style.cssText='position:fixed;left:-9999px;top:0;width:360px;padding:20px;background:#fff9f0;font-family:system-ui,-apple-system,Arial,sans-serif;color:#2b2118;border:2px solid #e8891f;border-radius:16px';
@@ -1098,7 +1099,7 @@ function viewMyReq(){
     <td data-label="Accommodation">${sevaLabel(b)}</td>
     <td data-label="Extra bed">${b.extraRequested>0?(b.extraBeds>0?`<span class="pill p-confirmed">${b.extraBeds} given</span>`:`<span class="pill p-pending">${b.extraRequested} requested</span>`):'<span class="muted">—</span>'}</td>
     <td data-label="Status">${devoteeStatusPill(b)}</td>
-    <td data-label="Location">${b.status==='confirmed'?allocDetailHTML(b)+(hotelSendContacts(b.hotel).length?`<div class="muted" style="color:var(--saffron-dark)">📞 ${hotelSendContacts(b.hotel).map(c=>esc(c.name)+' '+esc(c.phone)).join(' · ')}</div>`:''):'<span class="pill p-pending">Location pending</span>'}</td>
+    <td data-label="Location">${(b.status==='confirmed'&&locRevealed(b))?allocDetailHTML(b)+(hotelSendContacts(b.hotel).length?`<div class="muted" style="color:var(--saffron-dark)">📞 ${hotelSendContacts(b.hotel).map(c=>esc(c.name)+' '+esc(c.phone)).join(' · ')}</div>`:''):'<span class="pill p-pending">Location pending</span>'}</td>
     <td data-label="Actions"><div class="row-actions">${actions}</div></td>
   </tr>`; }).join('');
   return `<div class="card"><h2 class="section">📋 My Requests</h2>
@@ -1462,9 +1463,16 @@ function guaranteeNote(b){
   return R>G ? `${G} room${G>1?'s':''} confirmed · others depend on availability or contact concerned devotee`
              : `${Math.min(R,G)} room${Math.min(R,G)>1?'s':''} confirmed`;
 }
+/* Below ₹2.5 L: the confirmed status and hotel/location are hidden from the devotee until
+   2 Sep 2026, 1:00 PM IST (rooms may be swapped by donation before then). ₹2.5 L+ shows immediately. */
+function locRevealed(b){
+  if((Number(b.donation)||0) >= (DB.rules.d1Min||250000)) return true;
+  return Date.now() >= Date.UTC(2026,8,2,7,30,0);   // 2 Sep 2026 13:00 IST
+}
 function devoteeStatusPill(b){
-  if(b.status==='confirmed') return '<span class="pill p-confirmed">Confirmed</span>';
   if(b.status==='cancelled'||b.status==='withdrawn'||b.status==='rejected') return statusPill(b.status);
+  if(!locRevealed(b)) return '<span class="pill p-pending">Pending</span>';   // below ₹2.5 L — held until 2 Sep 1 PM IST
+  if(b.status==='confirmed') return '<span class="pill p-confirmed">Confirmed</span>';
   const waitNote = (b.bookedWhenFull && !b.hotel)
     ? `<div class="rooms-mini" style="margin-top:4px;color:var(--amber);background:#fdf0dc;border:1px solid #f0d9b0;border-radius:8px;padding:4px 8px">🕓 Currently full — on the waiting list. A room may open if a guest doesn\'t arrive; you can also contact the guest house team.</div>`
     : '';
