@@ -391,7 +391,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b72';
+const APP_BUILD='2026-08-16-b73';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -1273,11 +1273,12 @@ function reqFilterMatch(b){ const d=Number(b.donation)||0;
     case 'approved': return !!b.donationVerified;
     case 'above25L': return d>=250000;
     case 'above50k': return d>=50000;
+    case 'band50to25L': return d>=50000 && d<250000;
     case 'below50k': return d<50000;
     case 'below25k': return d<25000;
     default: return true; } }
 function reqFilterMenu(){ const o=(v,l)=>`<option value="${v}"${reqFilter===v?' selected':''}>${l}</option>`;
-  return `<select onchange="setReqFilter(this.value)" style="max-width:235px">${o('all','Filter: All')}${o('approved','Receipt approved')}${o('above25L','Donation ≥ ₹2.5 Lakh')}${o('above50k','Donation ≥ ₹50k')}${o('below50k','Donation below ₹50k')}${o('below25k','Donation below ₹25k')}</select>`; }
+  return `<select onchange="setReqFilter(this.value)" style="max-width:235px">${o('all','Filter: All')}${o('approved','Receipt verified')}${o('above25L','Donation ≥ ₹2.5 Lakh')}${o('above50k','Donation ≥ ₹50k')}${o('band50to25L','₹50k – below ₹2.5 Lakh')}${o('below50k','Donation below ₹50k')}${o('below25k','Donation below ₹25k')}</select>`; }
 function setBookedSort(v){ bookedSort=v; render(); }
 function sortBookings(list,mode){ const l=[...list];
   if(mode==='amtHigh') l.sort((a,c)=>(c.donation||0)-(a.donation||0));
