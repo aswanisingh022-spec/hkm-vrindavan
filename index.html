@@ -391,7 +391,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b71';
+const APP_BUILD='2026-08-16-b72';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -1265,6 +1265,19 @@ function guestCell(b,withSug){
 function reqSortVal(b){ const gt=b.guestType||'FR'; return (gt==='PR'||gt==='Media')?Infinity:(b.donation||0); }  // PR/Media on top, then by donation
 let reqSort='priority', bookedSort='priority';
 function setReqSort(v){ reqSort=v; render(); }
+/* Requests filter — by receipt approval or donation band (VCM sees the category floor; Super Admin the exact amount). */
+let reqFilter='all';
+function setReqFilter(v){ reqFilter=v; render(); }
+function reqFilterMatch(b){ const d=Number(b.donation)||0;
+  switch(reqFilter){
+    case 'approved': return !!b.donationVerified;
+    case 'above25L': return d>=250000;
+    case 'above50k': return d>=50000;
+    case 'below50k': return d<50000;
+    case 'below25k': return d<25000;
+    default: return true; } }
+function reqFilterMenu(){ const o=(v,l)=>`<option value="${v}"${reqFilter===v?' selected':''}>${l}</option>`;
+  return `<select onchange="setReqFilter(this.value)" style="max-width:235px">${o('all','Filter: All')}${o('approved','Receipt approved')}${o('above25L','Donation ≥ ₹2.5 Lakh')}${o('above50k','Donation ≥ ₹50k')}${o('below50k','Donation below ₹50k')}${o('below25k','Donation below ₹25k')}</select>`; }
 function setBookedSort(v){ bookedSort=v; render(); }
 function sortBookings(list,mode){ const l=[...list];
   if(mode==='amtHigh') l.sort((a,c)=>(c.donation||0)-(a.donation||0));
@@ -1278,7 +1291,7 @@ function sortBookings(list,mode){ const l=[...list];
 function sortMenu(mode,fn){ const o=(v,l)=>`<option value="${v}" ${mode===v?'selected':''}>${l}</option>`;
   return `<select onchange="${fn}(this.value)" style="max-width:210px">${o('priority','Sort: Priority')}${o('newest','Request: Newest first')}${o('oldest','Request: Oldest first')}${o('amtHigh','Amount: High → Low')}${o('amtLow','Amount: Low → High')}${o('dateEarly','Stay date: Earliest first')}${o('dateLate','Stay date: Latest first')}</select>`; }
 function viewRequests(){
-  const list=sortBookings(DB.bookings.filter(b=>b.status!=='confirmed'), reqSort);
+  const list=sortBookings(DB.bookings.filter(b=>b.status!=='confirmed').filter(reqFilterMatch), reqSort);
   const activeCount=list.filter(b=>b.status==='pending'||b.status==='waitlist').length;
   const rows=list.map(b=>{
     const dead=b.status==='cancelled'||b.status==='withdrawn'||b.status==='rejected';
@@ -1297,7 +1310,7 @@ function viewRequests(){
       </div></td></tr>`; }).join('');
   return `<div class="card"><h2 class="section">🆕 New Requests <span class="pill p-pending">${activeCount}</span></h2>
     <p class="subhead">Pick hotel → room type → adjust rooms → Confirm. Use <b>🔒 Lock &amp; Confirm</b> to confirm and protect it from auto-reallocation. Cancelled/pulled-back requests show greyed out with their room released.</p>
-    <div class="flex" style="margin-bottom:12px;gap:10px"><input placeholder="🔍 Search by guest name, number or devotee name" value="${esc(searchQ['reqRows']||'')}" oninput="setSearch('reqRows',this.value)" style="flex:1">${sortMenu(reqSort,'setReqSort')}</div>
+    <div class="flex" style="margin-bottom:12px;gap:10px;flex-wrap:wrap"><input placeholder="🔍 Search by guest name, number or devotee name" value="${esc(searchQ['reqRows']||'')}" oninput="setSearch('reqRows',this.value)" style="flex:1;min-width:220px">${sortMenu(reqSort,'setReqSort')}${reqFilterMenu()}</div>
     <div class="scrollx"><table><thead><tr><th>Request</th><th>Donation</th><th>Status</th><th>Allocation</th><th>Action</th></tr></thead>
       <tbody id="reqRows">${rows||'<tr><td colspan="5" class="muted">No pending requests 🎉</td></tr>'}</tbody></table></div></div>`;
 }
