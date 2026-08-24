@@ -394,7 +394,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b74';
+const APP_BUILD='2026-08-16-b75';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -1468,7 +1468,7 @@ function setSevaChannel(id,v){ const b=DB.bookings.find(x=>x.id===id); if(!b)ret
    ₹11L+ → 3 · ₹5L+ → 2 · ₹2.5L+/₹1L+/₹50k+ → 1 · below ₹50k → 0 (no guarantee). */
 function guaranteedRooms(donation){
   const d=Number(donation)||0;
-  if(d>=2500000) return 4;   // H1  ₹25L+
+  if(d>=2500000) return 5;   // H1  ₹25L+
   if(d>=1100000) return 3;   // H2  ₹11–25L
   if(d>=500000) return 2;    // H3  ₹5–11L
   if(d>=50000) return 1;     // D1 ₹2.5–5L / D2 ₹50k–2.5L
