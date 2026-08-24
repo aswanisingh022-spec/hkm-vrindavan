@@ -313,11 +313,11 @@ let DB = defaultDB();
 let _saveTimer=null;
 function save(){ if(!USER) return; clearTimeout(_saveTimer); _saveTimer=setTimeout(()=>{ syncToCloud().catch(e=>console.warn('sync',e)); }, 400); }
 /* ---- Supabase data layer ---- */
-/* Categories (high→low): H1 ₹25L+ · H2 ₹11–25L · H3 ₹5–11L · D1 ₹2.5–5L · D2 ₹50k–2.5L · D3 <₹50k.
-   H1/H2/H3 and D1 all get Braj Nidhi (top tier). */
-function catFloor(cat){ const r=DB.rules; return cat==='H1'?2500000:cat==='H2'?1100000:cat==='H3'?500000:cat==='D1'?(r.d1Min||0):cat==='D2'?(r.d2Min||0):0; }
-function computeCat(amt){ const r=DB.rules, d=Number(amt)||0; return d>=2500000?'H1':d>=1100000?'H2':d>=500000?'H3':d>=r.d1Min?'D1':d>=r.d2Min?'D2':'D3'; }
-function isTopCat(c){ return c==='H1'||c==='H2'||c==='H3'||c==='D1'; }   // all get Braj Nidhi
+/* Categories (high→low): H1 ₹25L+ · H2 ₹11–25L · H3 ₹5–11L · H4 ₹2.5–5L · D2 ₹50k–2.5L · D3 <₹50k.
+   H1/H2/H3/H4 all get Braj Nidhi (top tier). */
+function catFloor(cat){ const r=DB.rules; return cat==='H1'?2500000:cat==='H2'?1100000:cat==='H3'?500000:cat==='H4'?(r.d1Min||0):cat==='D2'?(r.d2Min||0):0; }
+function computeCat(amt){ const r=DB.rules, d=Number(amt)||0; return d>=2500000?'H1':d>=1100000?'H2':d>=500000?'H3':d>=r.d1Min?'H4':d>=r.d2Min?'D2':'D3'; }
+function isTopCat(c){ return c==='H1'||c==='H2'||c==='H3'||c==='H4'; }   // all get Braj Nidhi
 function bookingData(b){ const d=Object.assign({},b); delete d.donation; delete d.receipt; delete d.donationVerified; delete d.receiptWrong; delete d.devId; d.donationCategory=computeCat(b.donation);
   d.freeStay = (USER && USER.role==='vcm') ? !!b.freeStay : ((Number(b.donation)||0) >= DB.rules.freeMin);  // ₹50k+ = free stay; set by whoever has the real amount, preserved by VCM
   return d; }
@@ -394,7 +394,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b75';
+const APP_BUILD='2026-08-16-b76';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -1471,7 +1471,7 @@ function guaranteedRooms(donation){
   if(d>=2500000) return 5;   // H1  ₹25L+
   if(d>=1100000) return 3;   // H2  ₹11–25L
   if(d>=500000) return 2;    // H3  ₹5–11L
-  if(d>=50000) return 1;     // D1 ₹2.5–5L / D2 ₹50k–2.5L
+  if(d>=50000) return 1;     // H4 ₹2.5–5L / D2 ₹50k–2.5L
   return 0;                  // D3  below ₹50k
 }
 /* Devotee-facing status text based on donation tier and rooms requested. */
@@ -2018,14 +2018,14 @@ function viewSettings(){
     <div class="card"><h2 class="section">⚙️ Settings — Donation categories & suggestion rules</h2>
     <p class="subhead">Super Admin only. Any change here instantly recalculates all pending requests with the new rules.</p>
     <div class="grid g3">
-      <div><label>D1 minimum (₹) — top category</label><input type="number" min="0" value="${r.d1Min}" onchange="setRule('d1Min',this.value)"></div>
+      <div><label>H4 minimum (₹) — ₹2.5–5L band</label><input type="number" min="0" value="${r.d1Min}" onchange="setRule('d1Min',this.value)"></div>
       <div><label>D2 minimum (₹)</label><input type="number" min="0" value="${r.d2Min}" onchange="setRule('d2Min',this.value)"></div>
       <div><label>Free-stay minimum (₹)</label><input type="number" min="0" value="${r.freeMin}" onchange="setRule('freeMin',this.value)"></div>
     </div>
-    <p class="muted" style="margin-top:8px">D1 = ${inr(r.d1Min)} and above &nbsp;·&nbsp; D2 = ${inr(r.d2Min)} to below ${inr(r.d1Min)} &nbsp;·&nbsp; D3 = below ${inr(r.d2Min)} &nbsp;·&nbsp; Free stay ≥ ${inr(r.freeMin)}</p>
+    <p class="muted" style="margin-top:8px">H1 ≥ ₹25L · H2 ₹11–25L · H3 ₹5–11L · H4 = ${inr(r.d1Min)} to ₹5L &nbsp;·&nbsp; D2 = ${inr(r.d2Min)} to below ${inr(r.d1Min)} &nbsp;·&nbsp; D3 = below ${inr(r.d2Min)} &nbsp;·&nbsp; Free stay ≥ ${inr(r.freeMin)}</p>
     </div>
     <div class="grid g3">
-      <div class="card"><h2 class="section" style="margin:0 0 6px">D1 → guest houses</h2><p class="rooms-mini" style="margin:0 0 6px">Reserved for D1 only</p>${hotelCheck('D1')}</div>
+      <div class="card"><h2 class="section" style="margin:0 0 6px">Top tier → guest houses</h2><p class="rooms-mini" style="margin:0 0 6px">Reserved for top donors (H1–H4)</p>${hotelCheck('D1')}</div>
       <div class="card"><h2 class="section" style="margin:0 0 6px">D2 → guest houses</h2>${hotelCheck('D2')}</div>
       <div class="card"><h2 class="section" style="margin:0 0 6px">D3 → guest houses</h2>${hotelCheck('D3')}</div>
     </div>`;
