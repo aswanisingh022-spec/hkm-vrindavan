@@ -313,8 +313,11 @@ let DB = defaultDB();
 let _saveTimer=null;
 function save(){ if(!USER) return; clearTimeout(_saveTimer); _saveTimer=setTimeout(()=>{ syncToCloud().catch(e=>console.warn('sync',e)); }, 400); }
 /* ---- Supabase data layer ---- */
-function catFloor(cat){ const r=DB.rules; return cat==='D1'?(r.d1Min||0):cat==='D2'?(r.d2Min||0):0; }
-function computeCat(amt){ const r=DB.rules, d=Number(amt)||0; return d>=r.d1Min?'D1':(d>=r.d2Min?'D2':'D3'); }
+/* Categories (high→low): H1 ₹25L+ · H2 ₹11–25L · H3 ₹5–11L · D1 ₹2.5–5L · D2 ₹50k–2.5L · D3 <₹50k.
+   H1/H2/H3 and D1 all get Braj Nidhi (top tier). */
+function catFloor(cat){ const r=DB.rules; return cat==='H1'?2500000:cat==='H2'?1100000:cat==='H3'?500000:cat==='D1'?(r.d1Min||0):cat==='D2'?(r.d2Min||0):0; }
+function computeCat(amt){ const r=DB.rules, d=Number(amt)||0; return d>=2500000?'H1':d>=1100000?'H2':d>=500000?'H3':d>=r.d1Min?'D1':d>=r.d2Min?'D2':'D3'; }
+function isTopCat(c){ return c==='H1'||c==='H2'||c==='H3'||c==='D1'; }   // all get Braj Nidhi
 function bookingData(b){ const d=Object.assign({},b); delete d.donation; delete d.receipt; delete d.donationVerified; delete d.receiptWrong; delete d.devId; d.donationCategory=computeCat(b.donation);
   d.freeStay = (USER && USER.role==='vcm') ? !!b.freeStay : ((Number(b.donation)||0) >= DB.rules.freeMin);  // ₹50k+ = free stay; set by whoever has the real amount, preserved by VCM
   return d; }
@@ -391,7 +394,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b73';
+const APP_BUILD='2026-08-16-b74';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -419,8 +422,8 @@ function isSuper(){ return USER && USER.role==='admin'; }          // Super Admi
 function isVcm(){ return USER && USER.role==='vcm'; }              // VCM Guest House mini-admin
 function seeMoney(){ return isSuper(); }                            // only Super Admin sees rupee amounts / receipts
 /* donation category from the current rules */
-function guestCategory(b){ if(!seeMoney() && b.donationCategory) return b.donationCategory; const d=b.donation||0, r=DB.rules; return d>=r.d1Min?'D1':(d>=r.d2Min?'D2':'D3'); }
-function catColor(c){ return c==='D1'?'p-confirmed':c==='D2'?'p-waitlist':'p-pending'; }
+function guestCategory(b){ if(!seeMoney() && b.donationCategory) return b.donationCategory; return computeCat(b.donation); }
+function catColor(c){ return isTopCat(c)?'p-confirmed':c==='D2'?'p-waitlist':'p-pending'; }
 function catBadge(b){ const c=guestCategory(b); return `<span class="pill ${catColor(c)}">${c}</span>`; }
 /* what to show for a donation: Super Admin sees the amount, VCM sees only the category */
 function donDisplay(b){ return seeMoney()? money(b.donation) : catBadge(b); }
@@ -649,7 +652,7 @@ function buildPlans(b,allowExtra){
       if(h.volunteerOnly) return false;                       // Ved Vihari is reserved for Volunteers only — never suggested to FR / PR / Media / Kind Donor
       if(!openGeneralExists) return h.id==='h1';               // no other hotel can start these dates → offer ONLY Braj Nidhi, to every guest (bypass reserve + min gates)
       if(b.donation<(h.minDonation||0)) return false;         // FR hotel eligibility gate
-      if(cat!=='D1' && reserved.includes(h.id)) return false; // reserved hotels only for D1
+      if(!isTopCat(cat) && reserved.includes(h.id)) return false; // reserved hotels only for D1 / H-tiers
       return true; }).forEach(h=>{
     const oEnd=hotelOriginEnd(h,b.checkin,b.checkout);         // the hotel hosts checkin → oEnd; the rest continues in Braj Nidhi
     h.rooms.forEach(r=>{
@@ -1465,10 +1468,11 @@ function setSevaChannel(id,v){ const b=DB.bookings.find(x=>x.id===id); if(!b)ret
    ₹11L+ → 3 · ₹5L+ → 2 · ₹2.5L+/₹1L+/₹50k+ → 1 · below ₹50k → 0 (no guarantee). */
 function guaranteedRooms(donation){
   const d=Number(donation)||0;
-  if(d>=1100000) return 3;
-  if(d>=500000) return 2;
-  if(d>=50000) return 1;
-  return 0;
+  if(d>=2500000) return 4;   // H1  ₹25L+
+  if(d>=1100000) return 3;   // H2  ₹11–25L
+  if(d>=500000) return 2;    // H3  ₹5–11L
+  if(d>=50000) return 1;     // D1 ₹2.5–5L / D2 ₹50k–2.5L
+  return 0;                  // D3  below ₹50k
 }
 /* Devotee-facing status text based on donation tier and rooms requested. */
 function guaranteeNote(b){
@@ -1650,7 +1654,7 @@ function addHotel(){ const n=$('#newHotel').value.trim(); if(!n){toast('Enter ho
 function recalcPending(){ let cleared=0; const reserved=reservedHotelIds();
   DB.bookings.filter(b=>b.status==='pending'||b.status==='waitlist').forEach(b=>{
     if(b.hotel){ const h=DB.hotels.find(x=>x.id===b.hotel);
-      const catBad = h && guestCategory(b)!=='D1' && reserved.includes(h.id);   // reserved hotel but guest not D1
+      const catBad = h && !isTopCat(guestCategory(b)) && reserved.includes(h.id);   // reserved hotel but guest not top-tier
       if(!h || !h.active || (b.donation||0) < (h.minDonation||0) || catBad){
         b.hotel=''; b.roomType=''; b.rooms=0; b.roomPlan=null; cleared++; } } });
   return cleared; }
