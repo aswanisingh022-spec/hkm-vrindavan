@@ -394,7 +394,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b78';
+const APP_BUILD='2026-08-16-b79';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -456,6 +456,8 @@ function stayLabel(b){
   if(st.length===1) return `📅 ${fmtD(st[0].checkin)} → ${fmtD(st[0].checkout)}${st[0].extra?' 🛏️+bed':''}`;
   return st.map((s,i)=>`R${i+1}: ${fmtD(s.checkin)}→${fmtD(s.checkout)}${s.extra?' 🛏️':''}`).join(' · ');
 }
+function origStayLabel(b){ if(!b.origStays||!b.origStays.length) return ''; return stayLabel({stays:b.origStays}); }
+function datesChanged(b){ return !!(b.datesModified && b.origStays && b.origStays.length && stayLabel({stays:b.origStays})!==stayLabel(b)); }
 function statusPill(s){ const m={pending:'p-pending',confirmed:'p-confirmed',rejected:'p-rejected',waitlist:'p-waitlist',cancelled:'p-cancelled',withdrawn:'p-withdrawn'};
   return `<span class="pill ${m[s]||'p-pending'}">${s}</span>`; }
 function toast(msg){ const t=$('#toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),2200); }
@@ -1101,7 +1103,7 @@ function viewMyReq(){
          <button class="btn red sm" onclick="guestWithdraw('${b.id}')">Pull back</button>`;
     return `<tr>
     <td data-label="Guests">${headLabel(b)}${editedTag(b)}${b.receiptWrong?' <span class="pill p-rejected">⚠ receipt wrong — Edit &amp; give correct number</span>':''}<div class="muted">${peopleLabel(b)}${b.family?' · family':''}</div>${(b.edited && b.editedBy && b.editedBy!==USER.id)?`<div style="margin-top:5px;background:#fdf0dc;border:1px solid #f0d9b0;border-radius:8px;padding:5px 9px;font-size:12px;color:var(--amber)">🔔 Your request was updated by ${esc(b.editedBy)}${b.editedAt?(' on '+fmtDT(b.editedAt)):''}${b.lastEditNote?`<div style="margin-top:2px;color:var(--saffron-dark)">↪ ${esc(b.lastEditNote)}</div>`:''}</div>`:''}</td>
-    <td data-label="Dates">${stayLabel(b)||'<span class="muted">—</span>'}</td>
+    <td data-label="Dates">${stayLabel(b)||'<span class="muted">—</span>'}${datesChanged(b)?`<div class="rooms-mini" style="margin-top:4px;color:var(--muted)">Originally requested: <s>${origStayLabel(b)}</s></div><div class="rooms-mini" style="margin-top:4px;background:#fdf0dc;border:1px solid #f0d9b0;border-radius:7px;padding:5px 9px;color:var(--amber);font-weight:600">ℹ️ Your request has been modified as per availability of room</div>`:''}</td>
     <td data-label="Donation">${money(b.donation)}</td>
     <td data-label="Accommodation">${sevaLabel(b)}</td>
     <td data-label="Extra bed">${b.extraRequested>0?(b.extraBeds>0?`<span class="pill p-confirmed">${b.extraBeds} given</span>`:`<span class="pill p-pending">${b.extraRequested} requested</span>`):'<span class="muted">—</span>'}</td>
@@ -1263,6 +1265,7 @@ function setStayDate(id,i,which,val){ const b=DB.bookings.find(x=>x.id===id); if
   const eS=DB.rules.eventStart, eE=DB.rules.eventEnd, lastIn=prevDay(eE);
   if(!(b.stays&&b.stays.length)) b.stays=[{checkin:b.checkin,checkout:b.checkout,extra:(b.extraRequested>0)}];
   const s=b.stays[i]; if(!s) return;
+  if(!b.datesModified){ b.origStays=JSON.parse(JSON.stringify(b.stays)); b.datesModified=true; }   // keep the devotee's original request to show the change
   if(which==='checkin'){
     if(val && (val<eS||val>lastIn)){ toast('⚠ Invalid check-in — must be '+fmtD(eS)+' to '+fmtD(lastIn)); render(); return; }
     s.checkin=val; if(val && s.checkout && s.checkout<=val) s.checkout=nextDay(val);
