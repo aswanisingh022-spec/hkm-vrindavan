@@ -394,7 +394,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b77';
+const APP_BUILD='2026-08-16-b78';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -1250,6 +1250,31 @@ function allocCell(b){
         ${extraCtl}</div>
       ${metaLine}${transferCtl}${seva}</div>`;
 }
+/* Dates cell: Super Admin / VCM get editable check-in & check-out per stay (to shorten/adjust before confirming); others see read-only text. */
+function dateEditHTML(b){
+  const dates=stayLabel(b);
+  if(!(isSuper()||isVcm())) return dates?`<div class="muted" style="color:var(--saffron-dark)">${dates}</div>`:'';
+  const eS=DB.rules.eventStart, lastIn=prevDay(DB.rules.eventEnd), eE=DB.rules.eventEnd;
+  const stays=(b.stays&&b.stays.length)?b.stays:[{checkin:b.checkin,checkout:b.checkout}];
+  const rows=stays.map((s,i)=>`<span style="display:inline-flex;gap:4px;align-items:center;margin:2px 8px 2px 0">${stays.length>1?`<b>R${i+1}</b> `:''}<input type="date" value="${s.checkin||''}" min="${eS}" max="${lastIn}" onchange="setStayDate('${b.id}',${i},'checkin',this.value)" style="padding:2px 5px;font-size:12px"> → <input type="date" value="${s.checkout||''}" min="${s.checkin||eS}" max="${eE}" onchange="setStayDate('${b.id}',${i},'checkout',this.value)" style="padding:2px 5px;font-size:12px"></span>`).join('');
+  return `<div class="rooms-mini" style="margin-top:5px;color:var(--saffron-dark)">📅 <b>Stay dates</b> (editable): ${rows}</div>`;
+}
+function setStayDate(id,i,which,val){ const b=DB.bookings.find(x=>x.id===id); if(!b || !(isSuper()||isVcm())) return;
+  const eS=DB.rules.eventStart, eE=DB.rules.eventEnd, lastIn=prevDay(eE);
+  if(!(b.stays&&b.stays.length)) b.stays=[{checkin:b.checkin,checkout:b.checkout,extra:(b.extraRequested>0)}];
+  const s=b.stays[i]; if(!s) return;
+  if(which==='checkin'){
+    if(val && (val<eS||val>lastIn)){ toast('⚠ Invalid check-in — must be '+fmtD(eS)+' to '+fmtD(lastIn)); render(); return; }
+    s.checkin=val; if(val && s.checkout && s.checkout<=val) s.checkout=nextDay(val);
+  } else {
+    if(val && val>eE){ toast('⚠ Invalid check-out — must be by '+fmtD(eE)); render(); return; }
+    if(val && s.checkin && val<=s.checkin){ toast('Check-out must be after check-in'); render(); return; }
+    s.checkout=val;
+  }
+  if(i===0){ b.checkin=b.stays[0].checkin; b.checkout=b.stays[0].checkout; }
+  markEdited(b, 'Stay dates → '+b.stays.map((x,ix)=>'R'+(ix+1)+' '+(x.checkin||'?')+'→'+(x.checkout||'?')).join(', '));
+  save(); render(); toast('Stay dates updated');
+}
 function guestCell(b,withSug){
   const prefTxt=b.preferred&&b.preferred.length?b.preferred.map(hotelName).join(', '):'—';
   let sugHTML='';
@@ -1264,7 +1289,7 @@ function guestCell(b,withSug){
   const fullTag = (b.bookedWhenFull && !b.hotel && b.status!=='confirmed') ? ' <span class="pill p-waitlist" title="Booked while all rooms were full">🕓 waitlist</span>' : '';
   return `<b>${headLabel(b)}</b>${catTag}${fullTag}${editedTag(b)}${b.receiptWrong?' <span class="pill p-rejected">✗ receipt wrong</span>':''}<div class="muted">requested by ${esc(devoteeName(b))}${b.phone?` · 📱 ${esc(b.phone)}`:''}</div>
       <div class="muted">${peopleLabel(b)}${b.family?' · 👪 family':''}${b.extraRequested>0?` · 🛏️ ${b.extraRequested} extra bed requested`:''}${reqRoomsTxt}</div>
-      ${dates?`<div class="muted" style="color:var(--saffron-dark)">${dates}</div>`:''}
+      ${dateEditHTML(b)}
       ${b.note?`<div class="muted" style="background:#fff4e4;border-radius:6px;padding:4px 8px;margin-top:4px">📝 ${esc(b.note)}</div>`:''}${sugHTML}`;
 }
 
