@@ -394,7 +394,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b76';
+const APP_BUILD='2026-08-16-b77';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -938,8 +938,12 @@ function renderDateRows(){ const c=$('#dateRows'); if(!c) return;
 function syncDates(i){
   const ci=document.querySelector('.ci[data-i="'+i+'"]'), co=document.querySelector('.co[data-i="'+i+'"]');
   if(!ci||!co) return;
+  const eS=DB.rules.eventStart, eE=DB.rules.eventEnd, lastIn=prevDay(eE);
+  // Instant reject: some mobile date pickers ignore the field's min/max — clear an out-of-window pick right away.
+  if(ci.value && (ci.value<eS || ci.value>lastIn)){ toast('⚠ Invalid date picked — check-in must be between '+fmtD(eS)+' and '+fmtD(lastIn)); ci.value=''; }
+  if(co.value && co.value>eE){ toast('⚠ Invalid date picked — check-out must be by '+fmtD(eE)); co.value=''; }
   if(ci.value){ co.min=ci.value; if(co.value && co.value<=ci.value){ co.value=''; toast('Check-out must be after check-in — please pick a later date'); } }
-  else { co.min=DB.rules.eventStart; }
+  else { co.min=eS; }
 }
 /* FOC gating: donation ≥ freeMin → FOC option enabled & auto-picked (devotee may change);
    donation < freeMin → FOC disabled and cannot be selected (fall back to Devotee). */
