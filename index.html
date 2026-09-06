@@ -394,7 +394,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b81';
+const APP_BUILD='2026-08-16-b82';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -597,9 +597,12 @@ function roomCapOnNight(h,type,d){ const r=(h.rooms||[]).find(x=>x.type===type);
 /* Effective available count of a room type on a given night, for display/editor prefill. */
 function effRoomCount(h,type,d){ const dr=h.dayRooms && h.dayRooms[d];
   if(dr && typeof dr==='object' && dr[type]!=null) return Math.max(0,dr[type]);
-  const r=(h.rooms||[]).find(x=>x.type===type); return r?r.count:0; }
+  const r=(h.rooms||[]).find(x=>x.type===type); const base=r?r.count:0;
+  const nc=h.nightCaps && h.nightCaps[d]; return (nc!=null) ? Math.min(base, nc) : base; }
 /* Is this night explicitly configured (custom) for this hotel? */
 function nightCustom(h,d){ const dr=h.dayRooms && h.dayRooms[d]; return !!(dr && typeof dr==='object' && Object.keys(dr).length); }
+/* Night has a legacy total cap (e.g. Hide Away) and no per-type override yet. */
+function nightCapped(h,d){ return !!(h.nightCaps && h.nightCaps[d]!=null) && !nightCustom(h,d); }
 /* Rooms of a type occupied on the night of d (checkin ≤ d < checkout). A booking in a date-limited
    hotel only occupies it on the hotel's OPEN nights — on later nights the guest has moved to Braj Nidhi. */
 function roomsUsedOnNight(hid,type,d,excludeId){ const h=DB.hotels.find(x=>x.id===hid);
@@ -1755,7 +1758,7 @@ function availByDateHTML(h){
         onchange="setDayRoom('${h.id}','${d}','${jsq(r.type)}',this.value)"></td>`; }).join('');
     return `<tr>
       <td style="text-align:left;white-space:nowrap"><b>${fmtD(d)}</b>
-        ${custom?'<span class="pill p-confirmed" style="margin-left:4px">custom</span>':'<span class="muted" style="font-size:11px;margin-left:4px">base</span>'}
+        ${custom?'<span class="pill p-confirmed" style="margin-left:4px">custom</span>':(nightCapped(h,d)?'<span class="pill p-pending" style="margin-left:4px">capped</span>':'<span class="muted" style="font-size:11px;margin-left:4px">base</span>')}
         ${!open?'<span class="pill p-rejected" style="margin-left:4px">closed</span>':''}</td>
       ${cells}
       <td class="row-actions">
