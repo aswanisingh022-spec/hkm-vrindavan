@@ -394,7 +394,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b82';
+const APP_BUILD='2026-08-16-b83';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -595,9 +595,10 @@ function roomCapOnNight(h,type,d){ const r=(h.rooms||[]).find(x=>x.type===type);
   if(dr && typeof dr==='object'){ const v=dr[type]; return (v!=null) ? Math.max(0,v) : r.count; }
   const nc=h.nightCaps && h.nightCaps[d]; return (nc!=null) ? Math.min(r.count, nc) : r.count; }
 /* Effective available count of a room type on a given night, for display/editor prefill. */
-function effRoomCount(h,type,d){ const dr=h.dayRooms && h.dayRooms[d];
-  if(dr && typeof dr==='object' && dr[type]!=null) return Math.max(0,dr[type]);
+function effRoomCount(h,type,d){ if(!hotelOpenOnNight(h,d)) return 0;
+  const dr=h.dayRooms && h.dayRooms[d];
   const r=(h.rooms||[]).find(x=>x.type===type); const base=r?r.count:0;
+  if(dr && typeof dr==='object'){ const v=dr[type]; return (v!=null)?Math.max(0,v):base; }
   const nc=h.nightCaps && h.nightCaps[d]; return (nc!=null) ? Math.min(base, nc) : base; }
 /* Is this night explicitly configured (custom) for this hotel? */
 function nightCustom(h,d){ const dr=h.dayRooms && h.dayRooms[d]; return !!(dr && typeof dr==='object' && Object.keys(dr).length); }
