@@ -394,7 +394,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b83';
+const APP_BUILD='2026-08-16-b84';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -1743,16 +1743,26 @@ function delRoom(id,i){ const h=DB.hotels.find(x=>x.id===id); const r=h&&h.rooms
   const reason=prompt('Remove the room type "'+r.type+'" ('+r.count+' rooms) from '+h.name+'?\n\nType a reason to confirm (required):');
   if(reason===null || !reason.trim()){ toast('Cancelled — a reason is required to remove a room'); return; }
   h.rooms.splice(i,1); roomLog('removed room "'+r.type+'" from', h.name, 'reason: '+reason.trim()); save(); render(); toast('Room removed — logged'); }
+/* The dates shown in the availability editor: the festival nights PLUS any extra dates the
+   Super Admin has already configured (day-room overrides, night caps, or custom open nights). */
+function availDates(h){
+  const set=new Set(festivalNights());
+  if(h.dayRooms) Object.keys(h.dayRooms).forEach(d=>set.add(d));
+  if(h.nightCaps) Object.keys(h.nightCaps).forEach(d=>set.add(d));
+  if(h.availNights) h.availNights.forEach(d=>set.add(d));
+  return [...set].filter(d=>/^\d{4}-\d\d-\d\d$/.test(d)).sort();
+}
+function isFestivalNight(d){ return festivalNights().indexOf(d)>=0; }
 /* Super-Admin: per-date, per-room-type availability editor.
-   Shows a night × room-type grid. Each cell is the number of that room type available on that night
-   (blank/base = the room's default count). Editing a cell writes h.dayRooms[date][type]. */
+   Shows a date × room-type grid. Each cell is the number of that room type available on that night
+   (base = the room's default count). Editing a cell writes h.dayRooms[date][type]. A date picker
+   lets the admin open an extra night beyond the festival dates. */
 function availByDateHTML(h){
-  const nights=festivalNights();
-  if(!nights.length) return '';
   if(!h.rooms||!h.rooms.length) return `<div style="margin-top:14px"><div class="rooms-mini" style="font-weight:700">📅 Availability by date</div><p class="muted" style="margin:4px 0 0">Add a room type first, then set how many are available on each date.</p></div>`;
+  const dates=availDates(h);
   const head=`<tr><th style="text-align:left">Date</th>${h.rooms.map(r=>`<th title="${esc(r.type)}">${esc(r.type)}</th>`).join('')}<th></th></tr>`;
-  const rows=nights.map(d=>{
-    const custom=nightCustom(h,d), open=hotelOpenOnNight(h,d);
+  const rows=dates.map(d=>{
+    const custom=nightCustom(h,d), open=hotelOpenOnNight(h,d), fest=isFestivalNight(d);
     const cells=h.rooms.map(r=>{
       const eff=effRoomCount(h,r.type,d);
       return `<td><input type="number" min="0" value="${eff}" style="width:64px;${!open?'opacity:.5':''}"
@@ -1760,16 +1770,22 @@ function availByDateHTML(h){
     return `<tr>
       <td style="text-align:left;white-space:nowrap"><b>${fmtD(d)}</b>
         ${custom?'<span class="pill p-confirmed" style="margin-left:4px">custom</span>':(nightCapped(h,d)?'<span class="pill p-pending" style="margin-left:4px">capped</span>':'<span class="muted" style="font-size:11px;margin-left:4px">base</span>')}
+        ${fest?'':'<span class="pill p-waitlist" style="margin-left:4px">added</span>'}
         ${!open?'<span class="pill p-rejected" style="margin-left:4px">closed</span>':''}</td>
       ${cells}
       <td class="row-actions">
         <button class="btn gray sm" onclick="toggleNightOpen('${h.id}','${d}')" title="${open?'Mark hotel closed this night':'Mark hotel open this night'}">${open?'Close':'Open'}</button>
-        ${custom?`<button class="btn gray sm" onclick="resetDayRooms('${h.id}','${d}')" title="Reset to base counts">↺ base</button>`:''}
+        ${fest?(custom?`<button class="btn gray sm" onclick="resetDayRooms('${h.id}','${d}')" title="Reset to base counts">↺ base</button>`:'')
+              :`<button class="btn red sm" onclick="removeAvailDate('${h.id}','${d}')" title="Remove this date">✕</button>`}
       </td></tr>`; }).join('');
   return `<div style="margin-top:16px">
     <div class="rooms-mini" style="font-weight:700;margin-bottom:2px">📅 Availability by date</div>
-    <p class="rooms-mini muted" style="margin:0 0 6px">Set how many of each room type are open on each night. Leave a night as <b>base</b> to use the room counts above; type a number (including 0) to override it for that night. Nights marked <b>custom</b> are the ones you've filled.</p>
+    <p class="rooms-mini muted" style="margin:0 0 6px">Set how many of each room type are open on each night. Leave a night as <b>base</b> to use the room counts above; type a number (including 0) to override it. Use <b>Add a date</b> to open an extra night beyond the festival dates.</p>
     <table><thead>${head}</thead><tbody>${rows}</tbody></table>
+    <div class="flex" style="margin-top:8px;align-items:end;gap:8px">
+      <div><label style="margin:0">Add a date</label><input type="date" id="ad-${h.id}" style="width:170px"></div>
+      <button class="btn sm" onclick="addAvailDate('${h.id}')">+ Add date</button>
+    </div>
   </div>`;
 }
 function setDayRoom(id,date,type,val){ const h=DB.hotels.find(x=>x.id===id); if(!h)return;
@@ -1794,6 +1810,24 @@ function toggleNightOpen(id,date){ const h=DB.hotels.find(x=>x.id===id); if(!h)r
   if(nights.every(x=>h.availNights.indexOf(x)>=0)) delete h.availNights;
   roomLog(wasOpen?'closed a night at':'opened a night at', h.name, fmtD(date));
   recalcPending(); save(); render(); toast(`${esc(h.name)} ${wasOpen?'closed':'open'} on ${fmtD(date)}`); }
+/* Super-Admin: open an extra night beyond the festival dates. Adds the date to the grid, marks the
+   hotel open on it, and pre-fills each room type with its base count so it can be edited. */
+function addAvailDate(id){ const h=DB.hotels.find(x=>x.id===id); if(!h)return;
+  const inp=$('#ad-'+id); const d=inp&&inp.value;
+  if(!d){ toast('Pick a date first'); return; }
+  if(availDates(h).indexOf(d)>=0){ toast(fmtD(d)+' is already in the list'); return; }
+  if(h.availNights && h.availNights.length && h.availNights.indexOf(d)<0) h.availNights.push(d);
+  if(!h.dayRooms) h.dayRooms={}; h.dayRooms[d]={};
+  h.rooms.forEach(r=> h.dayRooms[d][r.type]=r.count);
+  roomLog('added availability date at', h.name, fmtD(d));
+  recalcPending(); save(); render(); toast('Added '+fmtD(d)+' — set the room counts for that night'); }
+/* Remove an added (non-festival) date entirely from the hotel's availability. */
+function removeAvailDate(id,date){ const h=DB.hotels.find(x=>x.id===id); if(!h)return;
+  if(h.dayRooms){ delete h.dayRooms[date]; if(!Object.keys(h.dayRooms).length) delete h.dayRooms; }
+  if(h.nightCaps){ delete h.nightCaps[date]; if(!Object.keys(h.nightCaps).length) delete h.nightCaps; }
+  if(h.availNights){ h.availNights=h.availNights.filter(x=>x!==date); if(!h.availNights.length) delete h.availNights; }
+  roomLog('removed availability date at', h.name, fmtD(date));
+  recalcPending(); save(); render(); toast('Removed '+fmtD(date)); }
 function addContact(id){ const h=DB.hotels.find(x=>x.id===id); if(!h.contacts)h.contacts=[];
   const n=$('#cn-'+id).value.trim(), p=$('#cp-'+id).value.trim();
   if(!n||!p){ toast('Enter both name and phone'); return; }
