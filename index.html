@@ -2592,6 +2592,2204 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
+const APP_BUILD='2026-08-16-b81';
+async function checkForUpdate(){
+  try{
+    const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
+    if(typeof editingId!=='undefined' && editingId) return;
+    if(typeof currentTab!=='undefined' && currentTab==='newreq') return;
+    const t=await (await fetch(location.pathname+'?cb='+Date.now(),{cache:'no-store'})).text();
+    const m=t.match(/APP_BUILD='([^']+)'/);
+    if(m && m[1] && m[1]!==APP_BUILD){ try{toast('New version available — refreshing…');}catch(e){} setTimeout(()=>location.reload(), 900); }
+  }catch(e){}
+}
+setInterval(checkForUpdate, 120000);   // check every 2 minutes
+if(!DB.notifications) DB.notifications=[];
+if(!DB.assign) DB.assign={};   // login ID -> person the credential was given to
+if(!DB.rules) DB.rules=JSON.parse(JSON.stringify(DEFAULT_RULES));
+Object.keys(DEFAULT_RULES).forEach(k=>{ if(DB.rules[k]===undefined) DB.rules[k]=DEFAULT_RULES[k]; });
+let USER = null;
+/* keep each hotel's donation gate in sync with the category rules: hotels reserved only for D1 require d1Min, others are open */
+function syncHotelMinFromRules(){ const r=DB.rules, d2=new Set(r.categoryHotels.D2||[]), d3=new Set(r.categoryHotels.D3||[]);
+  DB.hotels.forEach(h=>{ const d1only=(r.categoryHotels.D1||[]).includes(h.id) && !d2.has(h.id) && !d3.has(h.id);
+    h.minDonation = d1only ? r.d1Min : 0; }); }
+syncHotelMinFromRules();
+save();   // persist immediately so data survives closing the browser
+/* ---- roles & money privacy ---- */
+function isSuper(){ return USER && USER.role==='admin'; }          // Super Admin
+function isVcm(){ return USER && USER.role==='vcm'; }              // VCM Guest House mini-admin
+function seeMoney(){ return isSuper(); }                            // only Super Admin sees rupee amounts / receipts
+/* donation category from the current rules */
+function guestCategory(b){ if(!seeMoney() && b.donationCategory) return b.donationCategory; return computeCat(b.donation); }
+function catColor(c){ return isTopCat(c)?'p-confirmed':c==='D2'?'p-waitlist':'p-pending'; }
+function catBadge(b){ const c=guestCategory(b); return `<span class="pill ${catColor(c)}">${c}</span>`; }
+/* what to show for a donation: Super Admin sees the amount, VCM sees only the category */
+function donDisplay(b){ return seeMoney()? money(b.donation) : catBadge(b); }
+/* receipt sub-line: Super Admin sees the receipt number; VCM sees only verified/unverified (no number, no amount) */
+function donSub(b){
+  const gt=b.guestType||'FR';
+  if(gt!=='FR') return '<span style="color:var(--saffron-dark);font-weight:700">🎫 '+esc(gt)+' guest</span>';   // PR / Media / Volunteer — no receipt expected
+  if(b.sevaPlan==='kind' && !b.receipt) return '<span style="color:var(--saffron-dark);font-weight:700">🤝 Kind donor</span>';   // helping the temple — shown in place of receipt
+  if(seeMoney()) return b.donationVerified?'✅ receipt verified':(b.receipt?'📎 '+esc(b.receipt)+' (unverified)':'⚠️ no receipt');
+  return b.donationVerified?'✅ receipt verified':'⚠ receipt unverified'; }
+function notify(kind,msg,brahmachari,bookingId){ const n={id:uid('n'),ts:Date.now(),kind,msg,brahmachari:brahmachari||'',bookingId:bookingId||'',ack:false}; DB.notifications.unshift(n); if(USER){ sb.from('notifications').insert({id:n.id,data:n,ack:false,ts:new Date(n.ts).toISOString()}).then(()=>{},()=>{}); } save(); }
+
+/* ---------------- Helpers ---------------- */
+const $ = s => document.querySelector(s);
+function uid(p){ return p+Math.random().toString(36).slice(2,8); }
+function esc(s){ return (s||'').toString().replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function jsq(s){ return (s||'').toString().replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'&quot;'); }
+function money(n){ return '₹'+Number(n||0).toLocaleString('en-IN'); }
+function hotelName(id){ const h=DB.hotels.find(x=>x.id===id); return h?h.name:'—'; }
+/* Name of the devotee who made a booking: prefer the name currently assigned to their login ID
+   (Super Admin portal), fall back to the name saved on the booking, then the raw login ID. */
+function devoteeName(b){ if(!b) return ''; const a=(DB.assign && b.devId && DB.assign[b.devId]||'').trim(); if(a) return a; return (b.brahmachari||b.devId||'').trim(); }
+/* head of family + how many accompanied. Falls back to old guest-list format if present. */
+function headLabel(b){ if(b.head!==undefined&&b.head!=='') return esc(b.head)+(b.accompanying>0?' + '+b.accompanying:'');
+  return esc((b.guests||[]).join(', ')); }
+function peopleLabel(b){ return b.count+' person'+(b.count===1?'':'s')+((b.children||0)>0?` · ${b.children} child${b.children>1?'ren':''}`:''); }
+function fmtD(s){ if(!s) return '—'; const d=new Date(s+'T00:00'); return isNaN(d)?s:d.toLocaleDateString('en-IN',{day:'numeric',month:'short'}); }
+function stayLabel(b){
+  const st=(b.stays&&b.stays.length)?b.stays:(b.checkin?[{checkin:b.checkin,checkout:b.checkout,extra:b.extraRequested>0}]:[]);
+  if(!st.length||!st[0].checkin) return '';
+  if(st.length===1) return `📅 ${fmtD(st[0].checkin)} → ${fmtD(st[0].checkout)}${st[0].extra?' 🛏️+bed':''}`;
+  return st.map((s,i)=>`R${i+1}: ${fmtD(s.checkin)}→${fmtD(s.checkout)}${s.extra?' 🛏️':''}`).join(' · ');
+}
+function origStayLabel(b){ if(!b.origStays||!b.origStays.length) return ''; return stayLabel({stays:b.origStays}); }
+function datesChanged(b){ return !!(b.datesModified && b.origStays && b.origStays.length && stayLabel({stays:b.origStays})!==stayLabel(b)); }
+function statusPill(s){ const m={pending:'p-pending',confirmed:'p-confirmed',rejected:'p-rejected',waitlist:'p-waitlist',cancelled:'p-cancelled',withdrawn:'p-withdrawn'};
+  return `<span class="pill ${m[s]||'p-pending'}">${s}</span>`; }
+function toast(msg){ const t=$('#toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),2200); }
+function showNotice(title,bodyHTML,icon){ $('#noticeIcon').textContent=icon||'ℹ️'; $('#noticeTitle').textContent=title; $('#noticeBody').innerHTML=bodyHTML; $('#noticeOverlay').style.display='flex'; }
+function closeNotice(){ $('#noticeOverlay').style.display='none'; }
+/* Total un-allocated rooms across all active guest houses (0 = fully booked). */
+function totalFreeRooms(){ return DB.hotels.filter(h=>h.active).reduce((s,h)=>s+h.rooms.reduce((a,r)=>a+freeRoomsByType(h.id,r.type,r.count),0),0); }
+
+/* capacity used per hotel (sum of allocated rooms*cap not needed; track allocated guests) */
+function hotelCapacity(h){ return h.rooms.reduce((s,r)=>s+r.cap*r.count,0); }
+function hotelRoomsTotal(h){ return h.rooms.reduce((s,r)=>s+r.count,0); }
+function roomsBookedInHotel(hid){ return DB.bookings.filter(b=>b.hotel===hid&&b.status==='confirmed').reduce((s,b)=>s+(b.rooms||0),0); }
+function guestsBookedInHotel(hid){ return DB.bookings.filter(b=>b.hotel===hid&&b.status==='confirmed').reduce((s,b)=>s+(b.count||0),0); }
+/* a booking can occupy multiple room types (roomPlan) or a single type — return the list either way */
+function bookingRooms(b){ if(b.roomPlan&&b.roomPlan.length) return b.roomPlan.map(x=>({type:x.type,rooms:x.rooms}));
+  if(b.roomType&&b.rooms) return [{type:b.roomType,rooms:b.rooms}]; return []; }
+/* human-readable summary of a booking's rooms, e.g. "3-bed × 1 + 1-bed × 1 + 1 extra bed" */
+function allocSummary(b){ const parts=bookingRooms(b).map(rp=>`${rp.type} × ${rp.rooms}`);
+  if((b.extraBeds||0)>0) parts.push(`${b.extraBeds} extra bed`); return parts.join(' + ')||'—'; }
+/* If the allocated hotel is only available until a cutoff date and the guest stays past it, the stay
+   automatically continues in the hotel's transfer-to guest house from that date. Returns 2 dated segments, or null. */
+function staySplit(b){
+  const h=DB.hotels.find(x=>x.id===b.hotel); if(!h||h.id==='h1') return null;   // Braj Nidhi never splits
+  if(!b.checkin||!b.checkout) return null;
+  if(!hotelNights(h)) return null;                                             // hotel open all festival → no split
+  const braj=DB.hotels.find(x=>x.id==='h1'); if(!braj) return null;
+  const originEnd=hotelOriginEnd(h,b.checkin,b.checkout);
+  if(originEnd===null)                                                         // not open on the check-in night → whole stay must be Braj Nidhi
+    return [{name:braj.name, from:b.checkin, to:b.checkout, hid:braj.id, fullTransfer:true}];
+  if(originEnd>=b.checkout) return null;                                       // whole stay fits inside the hotel's open nights → no split
+  return [{name:h.name, from:b.checkin, to:originEnd, hid:h.id}, {name:braj.name, from:originEnd, to:b.checkout, hid:braj.id}];
+}
+/* Rooms available in the Braj Nidhi continuation house */
+function brajRoomsList(){ const h=DB.hotels.find(x=>x.id==='h1'); return h?h.rooms:[]; }
+/* Smart default room type for the Braj Nidhi continuation of a split stay:
+   1) keep the same room type name if Braj Nidhi offers it (e.g. origin 3-bed → Braj Nidhi 3-bed);
+   2) otherwise the smallest Braj Nidhi room that fits the whole group (1 person → smallest room);
+   3) fall back to the largest room. */
+function defaultTransferType(b){
+  const rooms=brajRoomsList(); if(!rooms.length) return '';
+  if(b.roomType && rooms.some(r=>r.type===b.roomType)) return b.roomType;
+  const sorted=rooms.slice().sort((a,c)=>a.cap-c.cap);
+  const fit=sorted.find(r=>r.cap>=(b.count||1));
+  return (fit||sorted[sorted.length-1]).type;
+}
+/* The Braj Nidhi continuation room {type,rooms}: admin/VCM-set values if present, else smart default. */
+function transferPlan(b){
+  const type=b.transferRoomType||defaultTransferType(b);
+  const rObj=brajRoomsList().find(r=>r.type===type);
+  const rooms=(b.transferRooms>0)?b.transferRooms:(rObj?Math.max(1,Math.ceil((b.count||1)/rObj.cap)):1);
+  return {type, rooms};
+}
+/* Location detail for a confirmed booking, showing the date-based split across two hotels when it applies. */
+function allocDetailHTML(b){
+  const split=staySplit(b);
+  if(!split) return `<b>${esc(hotelName(b.hotel))}</b><div class="muted">${allocSummary(b)}</div>`;
+  const tp=transferPlan(b);
+  if(split.length===1 && split[0].fullTransfer){
+    return `<div class="muted" style="color:var(--red);margin-bottom:2px">⚠ ${esc(hotelName(b.hotel))} is closed for these dates — full stay in ${esc(split[0].name)}</div>`+
+      `<div><b>${esc(split[0].name)}</b> <span class="muted">📅 ${fmtD(split[0].from)} → ${fmtD(split[0].to)} · ${esc(tp.type+' × '+tp.rooms)}</span></div>`;
+  }
+  const roomFor=(i)=> i===0 ? allocSummary(b) : `${tp.type} × ${tp.rooms}`;
+  return `<div class="muted" style="margin-bottom:2px">split by dates:</div>`+
+    split.map((s,i)=>`<div><b>${i===0?'①':'②'} ${esc(s.name)}</b> <span class="muted">📅 ${fmtD(s.from)} → ${fmtD(s.to)} · ${esc(roomFor(i))}</span></div>`).join('');
+}
+/* compact hotel text (for narrow views like staff) showing the split when it applies */
+function allocHotelText(b){ const split=staySplit(b); if(!split) return esc(hotelName(b.hotel));
+  return split.map(s=>`${esc(s.name)} <span class="muted">(${fmtD(s.from)}→${fmtD(s.to)})</span>`).join('<br>'); }
+/* A booking's date range, defaulting to the whole festival window if a date is missing. */
+function bkRange(b){ return { in: (b&&b.checkin)||DB.rules.eventStart, out: (b&&b.checkout)||DB.rules.eventEnd }; }
+/* Two stays overlap only if one starts before the other ends. Same-day turnover (A checks out the day
+   B checks in) does NOT overlap — so the same room can serve both. */
+function datesOverlap(aIn,aOut,bIn,bOut){ return aIn < bOut && bIn < aOut; }
+/* rooms of a given type already assigned (confirmed) in a hotel, optionally excluding one booking.
+   If forB (a booking) is given, only count bookings whose dates OVERLAP forB's dates — so a room freed
+   before forB checks in is available again. */
+function roomsAssignedByType(hid,type,excludeId,forB){ const R=forB?bkRange(forB):null;
+  return DB.bookings.filter(b=>b.hotel===hid&&b.status==='confirmed'&&b.id!==excludeId
+      && (!R || datesOverlap(R.in,R.out,(b.checkin||DB.rules.eventStart),(b.checkout||DB.rules.eventEnd))))
+  .reduce((s,b)=> s + bookingRooms(b).filter(rp=>rp.type===type).reduce((a,rp)=>a+rp.rooms,0), 0); }
+function vacantRooms(hid,type,count,forB){ return Math.max(0,count-roomsAssignedByType(hid,type,forB&&forB.id,forB)); }
+/* Peak number of rooms of a type used at any one moment across the festival (date-aware): a room reused
+   by two non-overlapping stays counts once. Used for the "rooms free" summary displays. */
+function peakRoomsUsed(hid,type,excludeId){ const segs=[];
+  DB.bookings.filter(b=>b.hotel===hid&&b.status==='confirmed'&&b.id!==excludeId).forEach(b=>{
+    const rms=bookingRooms(b).filter(rp=>rp.type===type).reduce((a,rp)=>a+rp.rooms,0);
+    if(rms>0) segs.push([(b.checkin||DB.rules.eventStart),(b.checkout||DB.rules.eventEnd),rms]); });
+  if(!segs.length) return 0;
+  const ev=[]; segs.forEach(([ci,co,r])=>{ ev.push([ci,r]); ev.push([co,-r]); });
+  ev.sort((a,b)=> a[0]<b[0]?-1 : a[0]>b[0]?1 : (a[1]-b[1]));   // on the same day, free (−) before occupy (+) → turnover reuse
+  let cur=0,peak=0; ev.forEach(e=>{ cur+=e[1]; if(cur>peak)peak=cur; }); return peak; }
+function freeRoomsByType(hid,type,count){ return Math.max(0,count-peakRoomsUsed(hid,type)); }
+/* Rooms of a type occupied on the NIGHT of date d (a booking occupies it when checkin ≤ d < checkout). */
+function roomsUsedOnDate(hid,type,d){ if(!d) return peakRoomsUsed(hid,type);
+  return DB.bookings.filter(b=>b.hotel===hid&&b.status==='confirmed'
+      && (b.checkin||DB.rules.eventStart)<=d && d<(b.checkout||DB.rules.eventEnd))
+    .reduce((s,b)=> s + bookingRooms(b).filter(rp=>rp.type===type).reduce((a,rp)=>a+rp.rooms,0), 0); }
+// Timezone-safe day math (using UTC so IST/other offsets don't shift the date).
+function nextDay(d){ const p=(d||'').split('-').map(Number); if(p.length!==3) return d; return new Date(Date.UTC(p[0],p[1]-1,p[2]+1)).toISOString().slice(0,10); }
+function prevDay(d){ const p=(d||'').split('-').map(Number); if(p.length!==3) return d; return new Date(Date.UTC(p[0],p[1]-1,p[2]-1)).toISOString().slice(0,10); }
+function nightsBetween(from,to){ const a=new Date(from+'T00:00'), b=new Date(to+'T00:00'); if(isNaN(a)||isNaN(b)) return 1; return Math.max(1, Math.round((b-a)/86400000)+1); }
+/* Peak rooms of a type used at any single night WITHIN [from..to] (date-aware, clipped to the window). */
+function peakRoomsUsedRange(hid,type,from,to){ const wStart=from, wEnd=nextDay(to); const segs=[];
+  DB.bookings.filter(b=>b.hotel===hid&&b.status==='confirmed').forEach(b=>{
+    const rms=bookingRooms(b).filter(rp=>rp.type===type).reduce((a,rp)=>a+rp.rooms,0); if(rms<=0) return;
+    const ci=b.checkin||DB.rules.eventStart, co=b.checkout||DB.rules.eventEnd;
+    const s=ci>wStart?ci:wStart, e=co<wEnd?co:wEnd; if(s<e) segs.push([s,e,rms]); });
+  if(!segs.length) return 0;
+  const ev=[]; segs.forEach(([s,e,r])=>{ ev.push([s,r]); ev.push([e,-r]); });
+  ev.sort((a,b)=> a[0]<b[0]?-1 : a[0]>b[0]?1 : (a[1]-b[1]));
+  let cur=0,pk=0; ev.forEach(x=>{ cur+=x[1]; if(cur>pk)pk=cur; }); return pk; }
+/* ---- Per-hotel availability calendar ----
+   h.availNights = list of nights (YYYY-MM-DD) the hotel is open. Absent/empty ⇒ open every festival night.
+   h.nightCaps   = optional { date: maxRooms } cap on total rooms available that specific night (e.g. Hide Away). */
+function hotelNights(h){ return (h && h.availNights && h.availNights.length) ? h.availNights : null; }
+function hotelOpenOnNight(h,d){ const a=hotelNights(h); return a ? a.indexOf(d)>=0 : true; }
+/* Hotel must be open EVERY night of the stay [ci → co) to be offered for it. */
+function hotelOpenForStay(h,ci,co){ const a=hotelNights(h); if(!a) return true; if(!ci||!co) return true;
+  for(let d=ci; d<co; d=nextDay(d)){ if(a.indexOf(d)<0) return false; } return true; }
+/* How far into the stay this hotel can host the guest: returns the checkout date of the portion the
+   hotel covers (the first night on/after check-in that it is closed, capped at checkout). null if the
+   hotel isn't even open on the check-in night. Open-all hotels (Braj Nidhi) return the full checkout. */
+function hotelOriginEnd(h,ci,co){ const a=hotelNights(h); if(!a) return co; if(!ci||!co) return co;
+  if(a.indexOf(ci)<0) return null; let d=ci; while(d<co && a.indexOf(d)>=0){ d=nextDay(d); } return d; }
+/* The festival nights that guests can actually occupy: eventStart .. the night before eventEnd. */
+function festivalNights(){ const out=[]; let d=DB.rules.eventStart, end=DB.rules.eventEnd; let guard=0;
+  while(d<end && guard++<60){ out.push(d); d=nextDay(d); } return out; }
+/* Rooms of a type physically available on night d.
+   Priority: (1) h.dayRooms[d][type] — Super-Admin per-date per-type override (can raise OR lower the base count);
+   (2) legacy numeric h.nightCaps[d] — a total cap for that night (e.g. Hide Away);
+   (3) the room's base count. Always 0 if the hotel is closed that night. */
+function roomCapOnNight(h,type,d){ const r=(h.rooms||[]).find(x=>x.type===type); if(!r) return 0; if(!hotelOpenOnNight(h,d)) return 0;
+  const dr=h.dayRooms && h.dayRooms[d];
+  if(dr && typeof dr==='object'){ const v=dr[type]; return (v!=null) ? Math.max(0,v) : r.count; }
+  const nc=h.nightCaps && h.nightCaps[d]; return (nc!=null) ? Math.min(r.count, nc) : r.count; }
+/* Effective available count of a room type on a given night, for display/editor prefill. */
+function effRoomCount(h,type,d){ const dr=h.dayRooms && h.dayRooms[d];
+  if(dr && typeof dr==='object' && dr[type]!=null) return Math.max(0,dr[type]);
+  const r=(h.rooms||[]).find(x=>x.type===type); return r?r.count:0; }
+/* Is this night explicitly configured (custom) for this hotel? */
+function nightCustom(h,d){ const dr=h.dayRooms && h.dayRooms[d]; return !!(dr && typeof dr==='object' && Object.keys(dr).length); }
+/* Rooms of a type occupied on the night of d (checkin ≤ d < checkout). A booking in a date-limited
+   hotel only occupies it on the hotel's OPEN nights — on later nights the guest has moved to Braj Nidhi. */
+function roomsUsedOnNight(hid,type,d,excludeId){ const h=DB.hotels.find(x=>x.id===hid);
+  return DB.bookings.filter(b=>b.hotel===hid&&b.status==='confirmed'&&b.id!==excludeId
+    && (b.checkin||DB.rules.eventStart)<=d && d<(b.checkout||DB.rules.eventEnd)
+    && (!h || hotelOpenOnNight(h,d)))
+  .reduce((s,b)=> s + bookingRooms(b).filter(rp=>rp.type===type).reduce((a,rp)=>a+rp.rooms,0), 0); }
+/* Rooms of a type free for a WHOLE stay [ci → co): the tightest night wins. 0 if the hotel is closed any night. */
+function freeRoomsForStay(h,type,ci,co,excludeId){ if(!ci||!co){ const r=(h.rooms||[]).find(x=>x.type===type); return r?Math.max(0,r.count-roomsAssignedByType(h.id,type,excludeId)):0; }
+  let mn=Infinity; for(let d=ci; d<co; d=nextDay(d)){ if(!hotelOpenOnNight(h,d)) return 0; const free=roomCapOnNight(h,type,d)-roomsUsedOnNight(h.id,type,d,excludeId); if(free<mn) mn=free; }
+  return mn===Infinity ? 0 : Math.max(0,mn); }
+let availDate=null;
+function setAvailDate(v){ availDate=v; render(); }
+let dashFrom=null, dashTo=null;
+function setDashFrom(v){ dashFrom=v; if(dashTo && dashTo<v) dashTo=v; render(); }
+function setDashTo(v){ dashTo=v; if(dashFrom && v<dashFrom) dashFrom=v; render(); }
+function resetDashRange(){ dashFrom=DB.rules.eventStart; dashTo=prevDay(DB.rules.eventEnd); render(); }
+/* Greedy pack a group of `need` people into a hotel's free rooms (largest rooms first). Returns a
+   roomPlan [{type,rooms}] only if the WHOLE group fits (one-group-one-hotel), else null. excludeId frees that booking's rooms. */
+function packGroup(hid,need,excludeId){
+  const h=DB.hotels.find(x=>x.id===hid); if(!h) return null;
+  const avail=h.rooms.map(r=>({type:r.type,cap:r.cap,free:Math.max(0,r.count-roomsAssignedByType(hid,r.type,excludeId))}))
+    .filter(r=>r.free>0).sort((a,c)=>c.cap-a.cap);
+  let remaining=need; const plan=[];
+  for(const r of avail){ if(remaining<=0) break;
+    const take=Math.min(r.free, Math.ceil(remaining/r.cap)); if(take>0){ plan.push({type:r.type,rooms:take}); remaining-=take*r.cap; } }
+  return remaining<=0 ? plan : null;
+}
+/* hotels sorted by priority (1 = highest) */
+function hotelsByPriority(){ return [...DB.hotels].sort((a,b)=>(a.priority||99)-(b.priority||99)); }
+/* manual allocation dropdown order: general/outside guest houses first, then the reserved own houses
+   (priority 1-2 = Braj Nidhi, Madhav Kutir) last, so Braj Nidhi is never the default first pick. */
+function hotelsForDropdown(){ const active=DB.hotels.filter(h=>h.active);
+  const general=active.filter(h=>(h.priority||99)>2).sort((a,b)=>(a.priority||99)-(b.priority||99));
+  const reserved=active.filter(h=>(h.priority||99)<=2).sort((a,b)=>(a.priority||99)-(b.priority||99));
+  return [...general,...reserved]; }
+/* up to 2 contact persons a hotel has ticked to include in the guest's email */
+function hotelSendContacts(hid){ const h=DB.hotels.find(x=>x.id===hid); return (h&&h.contacts?h.contacts.filter(c=>c.send):[]).slice(0,2); }
+/* people/bookings not yet given a confirmed hotel */
+function unassignedBookings(){ return DB.bookings.filter(b=>b.status==='pending'||b.status==='waitlist'); }
+/* Suggest best hotel + room type + number of rooms for a booking.
+   Rules: guest must meet the hotel's min donation; prefer the guest's preferred hotel if eligible & has room;
+   otherwise the highest-priority eligible hotel with vacancy. Room type: smallest room that fits the family in
+   one room, else the largest available type split across rooms. */
+/* Build candidate plans across eligible hotels. If allowExtra is false, no extra beds are used.
+   Respects a requested number of separate rooms (b.roomsRequested) as a minimum room count. */
+/* hotel ids reserved only for the top category D1 (Braj Nidhi, Madhav Kutir) */
+function reservedHotelIds(){ const map=DB.rules.categoryHotels; const inD2D3=new Set([...(map.D2||[]),...(map.D3||[])]);
+  return (map.D1||[]).filter(id=>!inD2D3.has(id)); }
+function buildPlans(b,allowExtra){
+  const minRooms=Math.max(1, b.roomsRequested||1);
+  const want=allowExtra?Math.max(0,b.extraRequested||0):0;   // extra beds the guest asked for (standard plan ignores)
+  const gt=b.guestType||'FR';
+  const typed = gt!=='FR' && DB.rules.guestTypeHotels && (DB.rules.guestTypeHotels[gt]||[]).length;  // PR/Media/Volunteer → fixed hotel
+  const cat=guestCategory(b);                                // D1 / D2 / D3
+  const catList = typed ? DB.rules.guestTypeHotels[gt] : (DB.rules.categoryHotels[cat]||[]);  // suggested hotel(s)
+  const reserved=reservedHotelIds();                         // D1-only hotels — never for D2/D3
+  // Is any ordinary (non-reserved, non-manual) guest house available to START this stay (open on check-in night)?
+  const openGeneralExists=DB.hotels.some(h=> h.active && !h.manualOnly && !h.volunteerOnly && !reserved.includes(h.id)
+      && hotelOriginEnd(h,b.checkin,b.checkout)!==null
+      && b.donation>=(h.minDonation||0));
+  const plans=[];
+  DB.hotels.filter(h=>{ if(!h.active) return false;
+      if(h.manualOnly) return false;                          // never auto-suggested (e.g. Madhav Kutir) — Super Admin assigns manually
+      if(hotelOriginEnd(h,b.checkin,b.checkout)===null) return false;  // hotel not open on the check-in night → can't start the stay here
+      if(typed) return catList.includes(h.id);                // PR/Media/Volunteer → only their fixed hotel, donation gate bypassed
+      if(h.volunteerOnly) return false;                       // Ved Vihari is reserved for Volunteers only — never suggested to FR / PR / Media / Kind Donor
+      if(!openGeneralExists) return h.id==='h1';               // no other hotel can start these dates → offer ONLY Braj Nidhi, to every guest (bypass reserve + min gates)
+      if(b.donation<(h.minDonation||0)) return false;         // FR hotel eligibility gate
+      if(!isTopCat(cat) && reserved.includes(h.id)) return false; // reserved hotels only for D1 / H-tiers
+      return true; }).forEach(h=>{
+    const oEnd=hotelOriginEnd(h,b.checkin,b.checkout);         // the hotel hosts checkin → oEnd; the rest continues in Braj Nidhi
+    h.rooms.forEach(r=>{
+      const vac=freeRoomsForStay(h,r.type,b.checkin,oEnd,b.id); if(vac<minRooms) return;   // free for the nights this hotel actually covers
+      for(let rooms=minRooms; rooms<=vac; rooms++){
+        const grant=h.extraBedding?Math.min(want,rooms):0;    // honor the request: 1 extra bed per room, only if hotel allows
+        const capacity=rooms*r.cap+grant;
+        if(capacity<b.count) continue;                        // not enough beds even with the extra
+        plans.push({hotel:h,roomType:r.type,rooms,extra:grant,
+          waste:capacity-b.count, extraShort:want-grant,       // how many requested extra beds this hotel can't provide
+          catPref:catList.includes(h.id)?0:1,                  // the category's own hotel(s) suggested first
+          sameType:(b.roomType && r.type===b.roomType)?0:1,    // prefer the SAME room type the guest already had (e.g. 3-bed → 3-bed on transfer)
+          pref:(b.preferred||[]).includes(h.id)?0:1, priority:h.priority||99});
+        break;
+      }
+    });
+  });
+  // category hotel first → fewest rooms (keep family together) → SAME room type as before → honor extra-bed → least waste → preferred → priority
+  plans.sort((a,c)=> a.catPref-c.catPref || a.rooms-c.rooms || a.sameType-c.sameType || a.extraShort-c.extraShort || a.waste-c.waste || a.pref-c.pref || a.priority-c.priority);
+  return plans;
+}
+function samePlan(a,c){ return a&&c&&a.hotel.id===c.hotel.id&&a.roomType===c.roomType&&a.rooms===c.rooms&&a.extra===c.extra; }
+/* Returns up to two labelled suggestions: an optimized one (may use extra bedding) and a standard one (rooms only). */
+function suggestAllocations(b){
+  const optimized=buildPlans(b,true)[0]||null;
+  const standard=buildPlans(b,false)[0]||null;
+  const list=[];
+  if(optimized) list.push(Object.assign({label:'Optimized'},optimized));
+  if(standard && !samePlan(optimized,standard)) list.push(Object.assign({label:'Standard'},standard));
+  return list;
+}
+/* backward-compatible single suggestion (used by unassigned view etc.) */
+function suggestAllocation(b){ return suggestAllocations(b)[0]||null; }
+function applySuggestion(id,which){ const b=DB.bookings.find(x=>x.id===id); if(!b)return;
+  const list=suggestAllocations(b);
+  const s=(which?list.find(x=>x.label.toLowerCase()===which):null)||list[0];
+  if(!s){ toast('No eligible hotel with free rooms'); return; }
+  b.hotel=s.hotel.id; b.roomType=s.roomType; b.rooms=s.rooms; b.extraBeds=s.extra; save(); render();
+  toast('Applied '+s.label+': '+s.hotel.name+' · '+s.roomType+' × '+s.rooms+(s.extra>0?' + '+s.extra+' extra bed':'')); }
+
+/* ---------------- Auth ---------------- */
+function roleLabel(r){ return r==='admin'?'Super Admin':r==='vcm'?'VCM Guest House':r==='staff'?'Staff':'Devotee'; }
+function saveLastLogin(){ try{ localStorage.setItem('hkm_lastLogin', JSON.stringify({id:USER.id,name:USER.name,role:USER.role,ts:Date.now()})); }catch(e){} }
+function getLastLogin(){ try{ return JSON.parse(localStorage.getItem('hkm_lastLogin')); }catch(e){ return null; } }
+function initLoginPrefill(){ const last=getLastLogin(); if(!last) return;
+  const idEl=$('#loginId'); if(idEl) idEl.value=last.id||'';
+  const hint=$('#loginHint'); if(hint) hint.innerHTML='↩ Welcome back, <b>'+esc(last.name||'')+'</b> · last logged in as '+roleLabel(last.role)+' ('+esc(last.id||'')+')'; }
+async function doLogin(){
+  const id=$('#loginId').value.trim(); const pass=$('#loginPass').value;
+  if(!id){ toast('Enter your Login ID'); return; }
+  if(!pass){ toast('Enter your password'); return; }
+  const btn=$('#loginBtn'); if(btn){ btn.disabled=true; btn.textContent='Signing in…'; }
+  try{
+    const email=id.toLowerCase()+'@hkm.local';
+    const { data, error } = await sb.auth.signInWithPassword({ email, password:pass });
+    if(error||!data.user){ toast('Invalid Login ID or password'); return; }
+    const { data:prof } = await sb.from('profiles').select('login_id,role,assigned_name').eq('id',data.user.id).maybeSingle();
+    if(!prof){ toast('No profile found for this login'); return; }
+    USER={ id:prof.login_id, role:prof.role, name:(prof.assigned_name&&prof.assigned_name.trim())||prof.login_id };
+    saveLastLogin();
+    await loadFromCloud();
+    $('#loginView').classList.add('hidden');
+    $('#appView').classList.remove('hidden');
+    $('#whoName').textContent=USER.name;
+    $('#whoRole').textContent=(USER.role==='admin'?'Super Admin':USER.role==='vcm'?'VCM Guest House':USER.role==='staff'?'Staff (view only)':'Devotee')+' · '+USER.id;
+    buildTabs();
+    startPoll();
+  }catch(e){ toast('Login failed — check your connection'); console.warn(e); }
+  finally{ if(btn){ btn.disabled=false; btn.textContent='Enter Portal'; } }
+}
+async function logout(){
+  // Flush any unsaved change to the cloud BEFORE signing out, so nothing is lost
+  try{ if(_saveTimer){ clearTimeout(_saveTimer); _saveTimer=null; } if(USER) await syncToCloud(); }catch(e){ console.warn('flush on logout',e); }
+  try{ await sb.auth.signOut(); }catch(e){}
+  USER=null; stopPoll(); $('#appView').classList.add('hidden'); $('#loginView').classList.remove('hidden'); const p=$('#loginPass'); if(p)p.value='';
+}
+/* Best-effort: also flush pending changes if the tab/browser is closed mid-edit */
+window.addEventListener('visibilitychange', function(){ if(document.visibilityState==='hidden' && USER && _saveTimer){ clearTimeout(_saveTimer); _saveTimer=null; try{ syncToCloud(); }catch(e){} } });
+
+/* ---------------- Navigation ---------------- */
+let currentTab='';
+function buildTabs(){
+  const adminTabs=[['dash','📊 Dashboard'],['requests','🆕 Requests'],['booked','✅ Booked'],['receipts','🧾 Receipts'],['seva','💰 To collect'],['collections','💰 Payments'],['braj','🏠 Braj Nidhi'],['report','📥 Report'],['notifs','🔔 Alerts<span id="notifBadge" class="tabbadge"></span>'],['hotels','🏨 Hotels'],['vacancy','🛏️ Vacancy'],['contacts','📇 Devotee Contact']];
+  const tabs = USER.role==='admin'
+    ? [...adminTabs,['donations','🧾 Donations'],['logins','🔑 Logins'],['exports','📥 Excel'],['settings','⚙️ Settings']]
+    : USER.role==='vcm'
+    ? adminTabs
+    : USER.role==='staff'
+    ? [['dash','📊 Dashboard'],['seva','💰 To collect'],['rooms','🛏️ Room Allocations'],['vacancy','🪟 Vacancy'],['contacts','📇 Devotee Contact']]
+    : [['newreq','➕ New Request'],['myreq','📋 My Requests']];
+  $('#tabs').innerHTML = tabs.map(([k,l])=>`<div class="tab" data-k="${k}" onclick="go('${k}')">${l}</div>`).join('');
+  go(tabs[0][0]);
+}
+function go(k){ currentTab=k; document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.k===k)); render(); }
+function render(){
+  const b=$('#pageBody');
+  if(USER.role==='admin'||USER.role==='vcm'){
+    if(currentTab==='dash') b.innerHTML=viewDash();
+    if(currentTab==='requests') b.innerHTML=viewRequests();
+    if(currentTab==='booked') b.innerHTML=viewBooked();
+    if(currentTab==='braj') b.innerHTML=viewBraj();
+    if(currentTab==='receipts') b.innerHTML=viewReceipts();
+    if(currentTab==='collections') b.innerHTML=viewCollections();
+    if(currentTab==='seva') b.innerHTML=viewSevaCollect();
+    if(currentTab==='report') b.innerHTML=viewReport();
+    if(currentTab==='notifs') b.innerHTML=viewNotifications();
+    if(currentTab==='hotels') b.innerHTML=viewHotels();
+    if(currentTab==='vacancy') b.innerHTML=viewVacancy();
+    if(currentTab==='contacts') b.innerHTML=viewContacts();
+    if(currentTab==='donations') b.innerHTML= isSuper()?viewDonations():'';
+    if(currentTab==='logins') b.innerHTML= isSuper()?viewLogins():'';
+    if(currentTab==='exports') b.innerHTML= isSuper()?viewExports():'';
+    if(currentTab==='settings') b.innerHTML= isSuper()?viewSettings():'';
+  } else if(USER.role==='staff'){
+    if(currentTab==='dash') b.innerHTML=viewDash();
+    if(currentTab==='seva') b.innerHTML=viewSevaCollect();
+    if(currentTab==='rooms') b.innerHTML=viewStaffRooms();
+    if(currentTab==='vacancy') b.innerHTML=viewStaffVacancy();
+    if(currentTab==='contacts') b.innerHTML=viewContacts();
+  } else {
+    if(currentTab==='newreq') b.innerHTML=viewNewReq();
+    if(currentTab==='myreq') b.innerHTML=viewMyReq();
+  }
+}
+/* ---------------- Staff (view only) ---------------- */
+/* ---------------- Devotee Contact directory (Super Admin, VCM, Staff) ---------------- */
+function locName(c){ return {GGN:'Gurugram',NOI:'Noida',VRN:'Vrindavan'}[c]||c; }
+function viewContacts(){
+  const list=(DB.rules&&DB.rules.contacts)||[];
+  const rows=list.map(c=>{
+    const phone=c.phone?`<a href="tel:${esc(c.phone)}" style="color:var(--saffron-dark);font-weight:600;text-decoration:none">📞 ${esc(c.phone)}</a>`:'<span class="muted">—</span>';
+    const email=c.email?`<a href="mailto:${esc(c.email)}" style="color:var(--saffron-dark);text-decoration:none">${esc(c.email)}</a>`:'<span class="muted">—</span>';
+    return `<tr data-search="${esc(((c.name||'')+' '+(c.code||'')+' '+(c.phone||'')+' '+(c.email||'')+' '+(c.location||'')+' '+locName(c.location||'')).toLowerCase())}">
+      <td data-label="Name"><b>${esc(c.name||'')}</b></td>
+      <td data-label="Short form">${c.code?`<span class="pill p-waitlist">${esc(c.code)}</span>`:'<span class="muted">—</span>'}</td>
+      <td data-label="Location">${c.location?esc(locName(c.location))+' <span class="muted">('+esc(c.location)+')</span>':'<span class="muted">—</span>'}</td>
+      <td data-label="Phone">${phone}</td>
+      <td data-label="Email">${email}</td></tr>`; }).join('')
+    || '<tr><td colspan="5" class="muted">No contacts added yet.</td></tr>';
+  return `<div class="card"><h2 class="section">📇 Devotee Contact <span class="pill p-confirmed">${list.length}</span></h2>
+    <p class="subhead">Preacher / devotee directory — name, short form, location, phone and email. Tap a number to call, tap an email to write.</p>
+    <input placeholder="🔍 Search name, short form, phone, email or location" value="${esc(searchQ['contactRows']||'')}" oninput="setSearch('contactRows',this.value)" style="margin-bottom:10px;max-width:440px">
+    <div class="scrollx"><table class="stack-mobile"><thead><tr><th>Name</th><th>Short form</th><th>Location</th><th>Phone</th><th>Email</th></tr></thead>
+      <tbody id="contactRows">${rows}</tbody></table></div></div>`;
+}
+
+let staffHotel='all';
+function setStaffHotel(v){ staffHotel=v; render(); }
+function filterStaffRows(q){ q=(q||'').toLowerCase().trim();
+  document.querySelectorAll('#staffRows tr').forEach(tr=>{ const n=tr.dataset.name||''; tr.style.display=n.includes(q)?'':'none'; }); }
+function viewStaffRooms(){
+  const hotelOpts=hotelsByPriority().filter(h=>h.active).map(h=>`<option value="${h.id}" ${staffHotel===h.id?'selected':''}>${esc(h.name)}</option>`).join('');
+  let bks=DB.bookings.filter(b=>b.status==='confirmed');
+  if(staffHotel!=='all') bks=bks.filter(b=>b.hotel===staffHotel);
+  bks.sort((a,b)=> (hotelName(a.hotel)||'').localeCompare(hotelName(b.hotel)||'') || (a.head||'').localeCompare(b.head||''));
+  const rows=bks.map(b=>{ const totalRooms=bookingRooms(b).reduce((s,r)=>s+r.rooms,0);
+    const key=((b.head||'')+' '+(b.phone||'')).toLowerCase();
+    return `<tr data-name="${esc(key)}">
+      <td><b>${esc(b.head||'')}</b><div class="muted">${peopleLabel(b)}</div></td>
+      <td>${b.phone?esc(b.phone):'<span class="muted">—</span>'}</td>
+      <td>${allocHotelText(b)}</td>
+      <td><b>${totalRooms}</b><div class="muted">${allocSummary(b)}</div></td>
+      <td>${fmtD(b.checkin)}</td>
+      <td>${fmtD(b.checkout)}</td></tr>`; }).join('');
+  return `<div class="card"><h2 class="section">🛏️ Room Allocations <span class="pill p-confirmed">${bks.length}</span></h2>
+    <p class="subhead">Search a guest by name or number, or filter by hotel. View only.</p>
+    <div class="flex" style="margin-bottom:12px">
+      <input placeholder="🔍 Search guest by name or number" value="${esc(searchQ['staffRows']||'')}" oninput="setSearch('staffRows',this.value)" style="flex:1">
+      <select onchange="setStaffHotel(this.value)" style="max-width:230px"><option value="all" ${staffHotel==='all'?'selected':''}>All hotels</option>${hotelOpts}</select>
+    </div>
+    <div class="scrollx"><table><thead><tr><th>Guest</th><th>Mobile</th><th>Hotel</th><th>Rooms</th><th>Check-in</th><th>Check-out</th></tr></thead>
+      <tbody id="staffRows">${rows||'<tr><td colspan="6" class="muted">No confirmed bookings yet</td></tr>'}</tbody></table></div></div>`;
+}
+function viewStaffVacancy(){
+  const cards=hotelsByPriority().filter(h=>h.active).map(h=>{
+    const rows=h.rooms.map(r=>{ const used=peakRoomsUsed(h.id,r.type), vac=Math.max(0,r.count-used);
+      return `<tr><td>${esc(r.type)}</td><td>${r.count}</td><td>${used}</td>
+        <td><b style="color:${vac>0?'var(--green)':'var(--red)'}">${vac}</b></td></tr>`; }).join('');
+    return `<div class="card"><h2 class="section" style="margin:0 0 6px">🪟 ${esc(h.name)}</h2>
+      <table><thead><tr><th>Room type</th><th>Total</th><th>Used</th><th>Free</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  }).join('');
+  return `<div class="card"><h2 class="section">🪟 Vacancy (view only)</h2></div>${cards}`;
+}
+
+/* ---------------- Brahmachari: New Request ---------------- */
+let editingId=null;
+function viewNewReq(){
+  const editing=editingId?DB.bookings.find(b=>b.id===editingId):null;
+  const hotelOpts=DB.hotels.filter(h=>h.active).map(h=>`<label style="font-weight:500;display:flex;gap:6px;align-items:center;margin:4px 0">
+    <input type="checkbox" style="width:auto" value="${h.id}" class="prefHotel"> ${esc(h.name)}</label>`).join('');
+  return `<div class="card">
+    <h2 class="section">${editing?'✏️ Edit Request':'➕ New Accommodation Request'}</h2>
+    <p class="subhead">${editing?'Update your request below and press Update. The admin will see it was edited.':'Note: One request per family. Enter the name of the head of the family and the total number of people. Please mention any Guest house preference or special requirements in the Notes section. The admin will decide and allocate the guest house based on availability.'}</p>
+    <div style="margin:0 0 14px;background:#fdecec;border:1px solid #f3c2c2;border-radius:9px;padding:10px 14px;font-size:14px;color:var(--red);font-weight:700">⚠ Note: Aadhaar verification will be required at the time of check-in to confirm the booking details.</div>
+    <div class="grid g2">
+      <div><label>Head of family (name)</label><input id="reqHead" placeholder="e.g. Raj Sharma"></div>
+      <div><label>Guest mobile number</label><input id="reqPhone" type="tel" inputmode="numeric" maxlength="10" oninput="this.value=this.value.replace(/[^0-9]/g,'').slice(0,10)" placeholder="10-digit mobile number"><div class="rooms-mini">Must be exactly 10 digits</div></div>
+    </div>
+    <div class="grid g2" style="margin-top:10px">
+      <div><label>Total number of people (including family head)</label>${reqStepper('reqTotal',1)}<div class="rooms-mini">Count everyone, including the head of the family</div></div>
+      <div><label>🚪 Number of rooms</label>${reqStepper('reqRooms',1)}<div class="rooms-mini">Default 1 · each room gets its own dates</div></div>
+    </div>
+    <div style="margin:12px 0 0;background:#fff4e4;border:1px solid var(--line);border-radius:10px;padding:10px 14px">
+      👥 <b id="sumPeople" style="font-size:17px;color:var(--saffron-dark)">1</b> people in this request</div>
+    <div class="grid g2">
+      <div><label>Booking type</label>
+        <select id="reqType" onchange="updateTypeUI()">
+          <option value="FR">FR Guest (donation)</option>
+          <option value="PR">PR</option>
+          <option value="Media">Media</option>
+          <option value="Volunteer">Volunteer</option>
+        </select></div>
+      <div><label>Donation amount (₹)</label><input id="reqDonation" type="number" min="0" placeholder="0" oninput="syncSevaPlan()" onchange="syncSevaPlan()"></div>
+    </div>
+    <div><label>Donation receipt number <span id="rcpStar" style="color:var(--red)">*</span></label><input id="reqReceipt" placeholder="Enter donation receipt number" oninput="checkReceipt()" onblur="checkReceipt()"><p id="rcpMsg" class="rooms-mini" style="margin:4px 0 0;color:var(--red);display:none">⚠ Please enter a correct receipt number</p></div>
+    <p class="rooms-mini" id="typeNote" style="margin:4px 0 0">FR Guest — donation receipt number is required.</p>
+    <div id="sevaPlanWrap" style="margin-top:10px;background:#f6efe2;border:1px dashed var(--line);border-radius:10px;padding:10px 14px">
+      <label style="margin-top:0">💰 Who will collect the room seva / payment?</label>
+      <select id="reqSevaPlan" onchange="sevaTouched()">
+        <option value="devotee">I (Devotee) will collect / arrange the seva</option>
+        <option value="staff">Staff will collect the seva</option>
+        <option value="foc">FOC — Free of cost (donation ₹50,000 &amp; above)</option>
+        <option value="kind">Kind Donor</option>
+      </select>
+      <p class="rooms-mini" id="sevaPlanNote" style="margin:4px 0 0">Donation ₹50,000 or above → <b>FOC (free of cost)</b> is auto-selected; you may change it. Below ₹50,000 → FOC is not available; choose Devotee or Staff. This shows up for Staff, VCM Guest House and Super Admin.</p></div>
+    <p class="rooms-mini" style="margin:10px 0 0;color:var(--saffron-dark)">🎪 Festival stay only — check in between ${fmtD(DB.rules.eventStart)} and ${fmtD(prevDay(DB.rules.eventEnd))}, and check out by ${fmtD(DB.rules.eventEnd)} ${DB.rules.eventStart.slice(0,4)}.</p>
+    <div id="dateRows"></div>
+    <label>Note / special request to coordinator</label><textarea id="reqNote" rows="3" placeholder="e.g. any preference, medical need, elderly guest, arrival time... The admin will see this."></textarea>
+    <div style="margin-top:14px;background:#fdf0dc;border:1px solid #f0d9b0;border-radius:9px;padding:10px 14px;font-size:13px;color:var(--amber)">
+      ⚠ Disclaimer: Booking confirmation is subject to availability. The donation receipt will be verified before allocation.</div>
+    <div class="flex" style="margin-top:14px">
+      <button class="btn" style="flex:1;min-width:150px;padding:13px" onclick="submitReq()">${editing?'Update Request':'Submit Request'}</button>
+      ${editing?`<button class="btn gray" style="padding:13px" onclick="cancelEdit()">Cancel edit</button>`:''}
+    </div>
+  </div>`;
+}
+function cancelEdit(){ editingId=null; go('myreq'); }
+function prefillEdit(){ if(!editingId) return; const b=DB.bookings.find(x=>x.id===editingId); if(!b){ editingId=null; return; }
+  const set=(id,v)=>{ const e=$(id); if(e) e.value=v; };
+  set('#reqHead',b.head||''); set('#reqPhone',b.phone||''); set('#reqType',b.guestType||'FR'); updateTypeUI(); set('#reqTotal',b.count||1); updateSummary();
+  set('#reqDonation',b.donation||''); set('#reqReceipt',b.receipt||'');
+  set('#reqRooms',b.roomsRequested||1); set('#reqSevaPlan',b.sevaPlan||'devotee'); { const sp=$('#reqSevaPlan'); if(sp) sp.dataset.userTouched='1'; }
+  (b.preferred||[]).forEach(pid=>{ const c=document.querySelector('.prefHotel[value="'+pid+'"]'); if(c) c.checked=true; });
+  renderDateRows();
+  const st=b.stays&&b.stays.length?b.stays:[{checkin:b.checkin,checkout:b.checkout,extra:(b.extraRequested>0)}];
+  const cis=[...document.querySelectorAll('.ci')], cos=[...document.querySelectorAll('.co')], exs=[...document.querySelectorAll('.exBed')];
+  st.forEach((s,i)=>{ if(cis[i]) cis[i].value=s.checkin||''; if(cos[i]) cos[i].value=s.checkout||''; if(exs[i]) exs[i].checked=!!s.extra; });
+  set('#reqNote',b.note||'');
+}
+function reqStepper(id,val){ return `<div class="stepper big">
+    <button type="button" onclick="reqStep('${id}',-1)">−</button>
+    <input id="${id}" type="number" min="0" value="${val}" onchange="reqStepChanged('${id}')">
+    <button type="button" onclick="reqStep('${id}',1)">+</button></div>`; }
+function reqStep(id,delta){ const e=document.getElementById(id); if(!e)return;
+  const min=(id==='reqRooms'||id==='reqTotal')?1:0; e.value=Math.max(min,(parseInt(e.value)||0)+delta); reqStepChanged(id); }
+function reqStepChanged(id){ if(id==='reqTotal') updateSummary(); if(id==='reqRooms') renderDateRows(); }
+function updateSummary(){ const te=$('#reqTotal'); if(!te) return;
+  const p=$('#sumPeople'); if(p) p.textContent=Math.max(1,parseInt(te.value)||1); }
+function updateTypeUI(){ const t=($('#reqType')||{}).value||'FR'; const note=$('#typeNote'), star=$('#rcpStar');
+  if(t==='FR'){ if(note)note.textContent='FR Guest — donation receipt number is required.'; if(star)star.style.display=''; }
+  else { if(note)note.textContent=t+' guest — no receipt needed. You may leave donation and receipt blank.'; if(star)star.style.display='none'; } }
+function renderDateRows(){ const c=$('#dateRows'); if(!c) return;
+  const n=Math.max(1, parseInt(($('#reqRooms')||{}).value)||1);
+  // preserve existing values across re-render
+  const prevCi=[...c.querySelectorAll('.ci')].map(x=>x.value), prevCo=[...c.querySelectorAll('.co')].map(x=>x.value), prevEx=[...c.querySelectorAll('.exBed')].map(x=>x.checked);
+  let html='';
+  for(let i=0;i<n;i++){
+    const label = n>1 ? `Room ${i+1}` : 'Stay dates';
+    const same = i>0 ? `<label class="rooms-mini" style="margin-left:8px;display:inline-flex;gap:5px;align-items:center;color:var(--red);font-weight:700;background:#fdecec;border:1px solid #f3c2c2;border-radius:7px;padding:3px 9px"><input type="checkbox" style="width:auto;accent-color:var(--red)" class="sameAbove" data-i="${i}" onchange="toggleSame(${i})"> same as Room 1</label>`:'';
+    html+=`<fieldset><legend>${label}${same}</legend>
+      <div class="grid g2">
+        <div><label>Check-in</label><input type="date" class="ci" data-i="${i}" min="${DB.rules.eventStart}" max="${prevDay(DB.rules.eventEnd)}" value="${prevCi[i]||''}" onchange="syncDates(${i})"></div>
+        <div><label>Check-out</label><input type="date" class="co" data-i="${i}" min="${prevCi[i]||DB.rules.eventStart}" max="${DB.rules.eventEnd}" value="${prevCo[i]||''}" onchange="syncDates(${i})"></div>
+      </div>
+      <label style="display:flex;gap:8px;align-items:center;margin-top:10px;font-size:14px;color:var(--red);font-weight:700">
+        <input type="checkbox" class="exBed" data-i="${i}" style="width:auto;accent-color:var(--red)" ${prevEx[i]?'checked':''}> 🛏️ Need an extra bed in this room? <span style="font-weight:400;color:var(--red)">(for a child / same family — 1 max)</span></label>
+      </fieldset>`;
+  }
+  c.innerHTML=html;
+}
+/* Keep a stay's dates sane: check-out cannot be on/before check-in. Locks the check-out picker's
+   minimum to the check-in date and clears an already-invalid check-out. */
+function syncDates(i){
+  const ci=document.querySelector('.ci[data-i="'+i+'"]'), co=document.querySelector('.co[data-i="'+i+'"]');
+  if(!ci||!co) return;
+  const eS=DB.rules.eventStart, eE=DB.rules.eventEnd, lastIn=prevDay(eE);
+  // Instant reject: some mobile date pickers ignore the field's min/max — clear an out-of-window pick right away.
+  if(ci.value && (ci.value<eS || ci.value>lastIn)){ toast('⚠ Invalid date picked — check-in must be between '+fmtD(eS)+' and '+fmtD(lastIn)); ci.value=''; }
+  if(co.value && co.value>eE){ toast('⚠ Invalid date picked — check-out must be by '+fmtD(eE)); co.value=''; }
+  if(ci.value){ co.min=ci.value; if(co.value && co.value<=ci.value){ co.value=''; toast('Check-out must be after check-in — please pick a later date'); } }
+  else { co.min=eS; }
+}
+/* FOC gating: donation ≥ freeMin → FOC option enabled & auto-picked (devotee may change);
+   donation < freeMin → FOC disabled and cannot be selected (fall back to Devotee). */
+function sevaTouched(){ const sel=$('#reqSevaPlan'); if(sel) sel.dataset.userTouched='1'; }
+/* Live receipt check while typing: flags only when the entry can no longer become a valid
+   HKMV… / VCMT… number (case-insensitive, spaces ignored). Empty = no warning. */
+function checkReceipt(){
+  const el=$('#reqReceipt'); if(!el) return; const msg=$('#rcpMsg');
+  const n=(el.value||'').replace(/\s+/g,'').toUpperCase();
+  const ok = n==='' || 'HKMV'.startsWith(n) || 'VCMT'.startsWith(n) || n.startsWith('HKMV') || n.startsWith('VCMT');
+  el.style.borderColor = ok ? '' : 'var(--red)';
+  if(msg) msg.style.display = ok ? 'none' : 'block';
+}
+function syncSevaPlan(){
+  const sel=$('#reqSevaPlan'); if(!sel) return;
+  const amt=Math.max(0, Number(($('#reqDonation')||{}).value)||0);
+  const freeMin=Number(DB.rules.freeMin)||50000;
+  const eligible = amt>=freeMin;
+  const foc=sel.querySelector('option[value="foc"]');
+  if(foc) foc.disabled=!eligible;
+  if(eligible){
+    if(!sel.dataset.userTouched || sel.value==='') sel.value='foc';
+  } else {
+    if(sel.value==='foc'){ sel.value='devotee'; }
+  }
+  const note=$('#sevaPlanNote');
+  if(note){ note.innerHTML = eligible
+    ? 'Donation is ₹50,000 or above → eligible for <b>FOC (free of cost)</b>. It is auto-selected; you may switch to Devotee or Staff if you prefer.'
+    : 'Donation is below ₹50,000 → <b>FOC is not available</b>. Please choose Devotee or Staff to collect the seva.'; }
+}
+function toggleSame(i){
+  const ci0=document.querySelector('.ci[data-i="0"]').value, co0=document.querySelector('.co[data-i="0"]').value;
+  const ci=document.querySelector('.ci[data-i="'+i+'"]'), co=document.querySelector('.co[data-i="'+i+'"]');
+  const chk=document.querySelector('.sameAbove[data-i="'+i+'"]');
+  if(chk.checked){ ci.value=ci0; co.value=co0; ci.disabled=true; co.disabled=true; }
+  else { ci.disabled=false; co.disabled=false; }
+}
+function submitReq(){
+  const head=$('#reqHead').value.trim();
+  if(!head){ toast('Enter the head of family name'); return; }
+  const total=Math.max(1,parseInt($('#reqTotal').value)||1);
+  const guestType=($('#reqType')||{}).value||'FR';
+  const receipt=$('#reqReceipt').value.trim();
+  const isKindDonor=(($('#reqSevaPlan')||{}).value)==='kind';
+  if(guestType==='FR' && !receipt && !isKindDonor){ toast('Donation receipt number is required for an FR Guest'); return; }
+  if(receipt && !isKindDonor){ const rClean=receipt.replace(/\s+/g,'').toUpperCase(); if(!/^(HKMV|VCMT).+/.test(rClean)){ toast('Invalid receipt number — please enter the correct number'); return; } }
+  const phoneDigits=($('#reqPhone').value||'').replace(/\D/g,'');
+  if(phoneDigits && phoneDigits.length!==10){ toast('Guest mobile number must be exactly 10 digits'); return; }
+  if(receipt){ const rNorm=receipt.toLowerCase(); const dup=DB.bookings.find(x=>x.id!==editingId && x.status!=='cancelled' && x.status!=='withdrawn' && (x.receipt||'').trim().toLowerCase()===rNorm);
+    if(dup){ showNotice('Receipt already used', `A request has already been submitted using receipt number <b>${esc(receipt)}</b>${dup.head?` (for <b>${esc(dup.head)}</b>)`:''}.<br><br>Each donation receipt can be used for only one booking request. Please check your existing requests, or use the correct receipt number.`, '⚠'); return; } }
+  const donationAmt=Math.max(0, Number($('#reqDonation').value)||0);
+  const sevaPlanVal=(($('#reqSevaPlan')||{}).value||'devotee');
+  const freeMinVal=Number(DB.rules.freeMin)||50000;
+  if(sevaPlanVal==='foc' && donationAmt<freeMinVal){ toast('FOC (free of cost) is only for donations of ₹'+freeMinVal.toLocaleString('en-IN')+' or above. Please choose Devotee or Staff.'); return; }
+  const pref=[];
+  const cis=[...document.querySelectorAll('.ci')], cos=[...document.querySelectorAll('.co')], exs=[...document.querySelectorAll('.exBed')];
+  const stays=cis.map((el,idx)=>({checkin:el.value, checkout:(cos[idx]||{}).value||'', extra:!!(exs[idx]&&exs[idx].checked)}));
+  if(!stays.length || !stays[0].checkin || !stays[0].checkout){ toast('Enter check-in and check-out dates'); return; }
+  for(let i=0;i<stays.length;i++){ const s=stays[i];
+    if(!s.checkin||!s.checkout){ toast('Fill dates for room '+(i+1)); return; }
+    if(s.checkout<=s.checkin){ toast('Room '+(i+1)+': check-out must be after check-in'); return; }
+    if(s.checkin<DB.rules.eventStart || s.checkin>=DB.rules.eventEnd || s.checkout>DB.rules.eventEnd){ toast('Check-in must be between '+fmtD(DB.rules.eventStart)+' and '+fmtD(prevDay(DB.rules.eventEnd))+', and check-out by '+fmtD(DB.rules.eventEnd)); return; } }
+  const rooms=Math.max(1,parseInt($('#reqRooms').value)||1);
+  const data={head:head,phone:phoneDigits,guestType:guestType,accompanying:total-1,count:total,family:total>1,preferred:pref,
+    donation:Number($('#reqDonation').value)||0,receipt:receipt,
+    extraRequested:stays.filter(s=>s.extra).length,
+    roomsRequested:rooms,
+    sevaPlan:(($('#reqSevaPlan')||{}).value||'devotee'),
+    stays:stays, checkin:stays[0].checkin, checkout:stays[0].checkout,
+    note:$('#reqNote').value.trim()};
+  if(editingId){ const b=DB.bookings.find(x=>x.id===editingId);
+    if(b && !isSuper() && !isVcm() && b.status==='confirmed'){ editingId=null; confirmedLockMsg(); go('myreq'); return; }   // devotees cannot edit a confirmed booking
+    if(b){ Object.assign(b,data); b.edited=true; b.editedAt=Date.now(); b.editedBy=USER.id; b.lastEditNote='Devotee updated the request (now '+b.count+' '+(b.count===1?'person':'people')+', '+b.roomsRequested+' room(s))'; b.receiptWrong=false;
+      notify('edit',`Edited request: ${b.head} (now ${b.count} ${b.count===1?'person':'people'}, ${b.roomsRequested} room(s)${b.extraRequested?`, ${b.extraRequested} extra bed`:''}) — review allocation`,USER.name,b.id); }
+    editingId=null; save(); toast('Request updated ✓ — admin notified'); go('myreq'); return; }
+  const full = totalFreeRooms()<=0;
+  const b=Object.assign({id:uid('b'),brahmachari:USER.name,devId:USER.id,extraBeds:0,
+    status:'pending',hotel:'',roomType:'',rooms:0,created:Date.now(),bookedWhenFull:full},data);
+  DB.bookings.unshift(b);
+  notify('new',`New request: ${b.head} (${b.count} ${b.count===1?'person':'people'}) — ${b.roomsRequested} room(s)${b.extraRequested?`, ${b.extraRequested} extra bed`:''}${full?' — ⚠ received while fully booked (waitlist)':''}`,USER.name,b.id);
+  save(); go('myreq');
+  if(full){ showNotice('Request received — currently full',
+    `All rooms are booked right now, so your request goes on the <b>waiting list</b>.<br><br>A room can open up if a confirmed guest doesn\'t arrive or cancels. You can also <b>speak with the guest house team</b> to check on availability.<br><br>The team has been notified and will allocate a room as soon as one is free.`, '🕓'); }
+  else toast('Request submitted ✓');
+}
+function confirmedLockMsg(){ toast('Room already confirmed — please contact the guest house for any change'); }
+function guestEdit(id){ const b=DB.bookings.find(x=>x.id===id); if(b&&b.status==='confirmed'){ confirmedLockMsg(); return; } editingId=id; go('newreq'); }
+function guestCancel(id){ const b=DB.bookings.find(x=>x.id===id); if(!b)return; if(b.status==='confirmed'){ confirmedLockMsg(); return; }
+  b.status='cancelled'; notify('cancel',`Cancelled: ${b.head} — room released automatically`,b.brahmachari,b.id); save(); render(); toast('Request cancelled — room released'); }
+function guestWithdraw(id){ const b=DB.bookings.find(x=>x.id===id); if(!b)return; if(b.status==='confirmed'){ confirmedLockMsg(); return; }
+  b.status='withdrawn'; notify('withdraw',`Pulled back: ${b.head} — room released automatically`,b.brahmachari,b.id); save(); render(); toast('Request pulled back — room released'); }
+function guestReopen(id){ const b=DB.bookings.find(x=>x.id===id); if(!b)return;
+  b.status='pending'; b.edited=true; notify('reopen',`Reopened: ${b.head} — needs allocation`,b.brahmachari,b.id); save(); render(); toast('Request reopened — sent to admin'); }
+
+/* ---------------- Brahmachari: My Requests ---------------- */
+/* Build a shareable image of a single request and open the phone's share sheet (WhatsApp etc.) */
+async function shareRequest(id){
+  const b=DB.bookings.find(x=>x.id===id); if(!b){ toast('Request not found'); return; }
+  if(typeof html2canvas!=='function'){ toast('Image tool still loading — try again in a moment'); return; }
+  const gNote = guaranteeNote(b);
+  const _rev = locRevealed(b);
+  const statusTxt = !_rev ? 'Pending' : (b.status==='confirmed' ? 'Confirmed ✅'
+    : (gNote ? gNote : 'Pending'));
+  const locTxt = (_rev && b.status==='confirmed') ? (hotelName(b.hotel)+(b.roomType?(' · '+b.roomType+(b.rooms>1?(' × '+b.rooms):'')):'')) : 'To be allocated';
+  const row=(k,v)=>`<tr><td style="color:#7a6a58;padding:5px 0;font-size:13px">${k}</td><td style="text-align:right;font-weight:700;padding:5px 0;font-size:13px">${esc(v)}</td></tr>`;
+  const card=document.createElement('div');
+  card.style.cssText='position:fixed;left:-9999px;top:0;width:360px;padding:20px;background:#fff9f0;font-family:system-ui,-apple-system,Arial,sans-serif;color:#2b2118;border:2px solid #e8891f;border-radius:16px';
+  card.innerHTML=`
+    <div style="text-align:center;margin-bottom:12px">
+      <div style="font-size:26px;line-height:1">☸</div>
+      <div style="font-weight:800;font-size:17px;margin-top:2px">Sri Vrindavan</div>
+      <div style="color:#c96f0d;font-size:12px">Accommodation Booking</div>
+    </div>
+    <table style="width:100%;border-collapse:collapse">
+      ${row('Guest', headLabel(b))}
+      ${row('People', peopleLabel(b))}
+      ${row('Dates', stayLabel(b)||'—')}
+      ${seeMoney()?row('Donation', money(b.donation)):''}
+      ${(seeMoney()&&b.receipt)?row('Receipt', b.receipt):''}
+      ${row('Status', statusTxt)}
+      ${row('Guest house', locTxt)}
+    </table>
+    <div style="text-align:center;color:#7a6a58;font-size:11px;margin-top:14px;border-top:1px dashed #ecdcc4;padding-top:8px">srivrindavan.com</div>`;
+  document.body.appendChild(card);
+  try{
+    const canvas=await html2canvas(card,{scale:2,backgroundColor:'#fff9f0'});
+    if(card.parentNode) document.body.removeChild(card);
+    const blob=await new Promise(res=>canvas.toBlob(res,'image/png'));
+    const file=new File([blob],'HKM-booking-'+(headLabel(b)||b.id)+'.png',{type:'image/png'});
+    // 1) Copy the IMAGE to the clipboard so it can be pasted straight into WhatsApp
+    if(navigator.clipboard && window.ClipboardItem){
+      try{ await navigator.clipboard.write([new ClipboardItem({'image/png':blob})]); toast('✅ Image copied — now paste it into WhatsApp'); return; }catch(e){ console.warn('clipboard image failed', e); }
+    }
+    // 2) Fallback for browsers without image-clipboard: open the share sheet with the image
+    if(navigator.canShare && navigator.canShare({files:[file]})){
+      try{ await navigator.share({files:[file], title:'Sri Vrindavan Booking', text:'Accommodation booking — '+headLabel(b)}); return; }catch(e){ if(e && e.name==='AbortError') return; }
+    }
+    // 3) Last resort: download the image so it can be attached in WhatsApp
+    const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=file.name; document.body.appendChild(a); a.click(); a.remove();
+    toast('Image saved — attach it in WhatsApp');
+  }catch(e){ if(card.parentNode) document.body.removeChild(card); console.warn(e); toast('Could not create the image'); }
+}
+function viewMyReq(){
+  const mine=DB.bookings.filter(b=>(b.devId&&b.devId===USER.id)||b.brahmachari===USER.name);
+  if(!mine.length) return `<div class="card"><h2 class="section">📋 My Requests</h2><p class="muted">No requests yet. Create one from “New Request”.</p></div>`;
+  const rows=mine.map(b=>{
+    const dead=b.status==='cancelled'||b.status==='withdrawn';
+    const shareBtn=`<button class="btn sm" onclick="shareRequest('${b.id}')">📋 Copy image</button>`;
+    const actions = b.status==='confirmed'
+      ? shareBtn+`<div class="muted" style="margin-top:6px;background:#e7f6ec;border:1px solid #bfe6cd;border-radius:8px;padding:6px 9px;font-size:12px;color:var(--green);font-weight:600">🔒 Room confirmed — for any change, please contact the guest house.</div>`
+      : dead
+      ? shareBtn+`<button class="btn gray sm" onclick="guestReopen('${b.id}')">Reopen</button>`
+      : shareBtn+`<button class="btn gray sm" onclick="guestEdit('${b.id}')">Edit</button>
+         <button class="btn gray sm" onclick="guestCancel('${b.id}')">Cancel</button>
+         <button class="btn red sm" onclick="guestWithdraw('${b.id}')">Pull back</button>`;
+    return `<tr>
+    <td data-label="Guests">${headLabel(b)}${editedTag(b)}${b.receiptWrong?' <span class="pill p-rejected">⚠ receipt wrong — Edit &amp; give correct number</span>':''}<div class="muted">${peopleLabel(b)}${b.family?' · family':''}</div>${(b.edited && b.editedBy && b.editedBy!==USER.id)?`<div style="margin-top:5px;background:#fdf0dc;border:1px solid #f0d9b0;border-radius:8px;padding:5px 9px;font-size:12px;color:var(--amber)">🔔 Your request was updated by ${esc(b.editedBy)}${b.editedAt?(' on '+fmtDT(b.editedAt)):''}${b.lastEditNote?`<div style="margin-top:2px;color:var(--saffron-dark)">↪ ${esc(b.lastEditNote)}</div>`:''}</div>`:''}</td>
+    <td data-label="Dates">${stayLabel(b)||'<span class="muted">—</span>'}${datesChanged(b)?`<div class="rooms-mini" style="margin-top:4px;color:var(--muted)">Originally requested: <s>${origStayLabel(b)}</s></div><div class="rooms-mini" style="margin-top:4px;background:#fdf0dc;border:1px solid #f0d9b0;border-radius:7px;padding:5px 9px;color:var(--amber);font-weight:600">ℹ️ Your request has been modified as per availability of room</div>`:''}</td>
+    <td data-label="Donation">${money(b.donation)}</td>
+    <td data-label="Accommodation">${sevaLabel(b)}</td>
+    <td data-label="Extra bed">${b.extraRequested>0?(b.extraBeds>0?`<span class="pill p-confirmed">${b.extraBeds} given</span>`:`<span class="pill p-pending">${b.extraRequested} requested</span>`):'<span class="muted">—</span>'}</td>
+    <td data-label="Status">${devoteeStatusPill(b)}</td>
+    <td data-label="Location">${(b.status==='confirmed'&&locRevealed(b))?allocDetailHTML(b)+(hotelSendContacts(b.hotel).length?`<div class="muted" style="color:var(--saffron-dark)">📞 ${hotelSendContacts(b.hotel).map(c=>esc(c.name)+' '+esc(c.phone)).join(' · ')}</div>`:''):'<span class="pill p-pending">Location pending</span>'}</td>
+    <td data-label="Actions"><div class="row-actions">${actions}</div></td>
+  </tr>`; }).join('');
+  return `<div class="card"><h2 class="section">📋 My Requests</h2>
+    <p class="subhead">You can Edit a request, Cancel it, or Pull it back (withdraw). Cancelling or pulling back frees the room for others.</p>
+    <table class="stack-mobile"><thead><tr><th>Guests</th><th>Dates</th><th>Donation</th><th>Accommodation</th><th>Extra bed</th><th>Status</th><th>Location</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table>
+    <p class="muted" style="margin-top:10px;font-size:12px">💡 Donations of ₹50,000 or above receive free accommodation and your room is <b>assured</b> — Status shows <b>Confirmed</b> right away, and the exact guest house &amp; room (Location) is shared once it is allocated. For smaller donations, an accommodation seva is collected by the coordinator.</p></div>`;
+}
+
+/* ---------------- Admin: Dashboard ---------------- */
+function viewDash(){
+  const hotels=DB.hotels, bk=DB.bookings;
+  const totCap=hotels.reduce((s,h)=>s+hotelCapacity(h),0);
+  const totRooms=hotels.reduce((s,h)=>s+hotelRoomsTotal(h),0);
+  // Date range the dashboard reports on (single night when From = To). Defaults to the whole festival.
+  const dFrom = dashFrom || DB.rules.eventStart;
+  const dTo   = dashTo   || prevDay(DB.rules.eventEnd);
+  const single = dFrom===dTo;
+  const overlapsRange=b=> datesOverlap(dFrom, nextDay(dTo), (b.checkin||DB.rules.eventStart), (b.checkout||DB.rules.eventEnd));
+  const dWinEnd=nextDay(dTo);   // occupancy window covers nights dFrom..dTo
+  // Rooms occupied at the busiest night within the range (per hotel/room-type pool, then summed).
+  const roomsBooked=hotels.reduce((s,h)=>s+h.rooms.reduce((a,r)=>a+peakRoomsUsedRange(h.id,r.type,dFrom,dTo),0),0);
+  // Rooms bookable starting on the selected date = hotels open on that night; each covers up to when it closes.
+  const roomsAvail=hotels.filter(h=>h.active && hotelOriginEnd(h,dFrom,dWinEnd)!==null).reduce((s,h)=>{ const oe=hotelOriginEnd(h,dFrom,dWinEnd); return s+h.rooms.reduce((a,r)=>a+freeRoomsForStay(h,r.type,dFrom,oe),0); },0);
+  const pending=bk.filter(b=>b.status==='pending' && overlapsRange(b)).length;
+  const confirmed=bk.filter(b=>b.status==='confirmed' && overlapsRange(b)).length;
+  const waitlist=bk.filter(b=>b.status==='waitlist' && overlapsRange(b)).length;
+  const totDon=bk.reduce((s,b)=>s+(b.donation||0),0);
+  const verifDon=bk.filter(b=>b.receipt).reduce((s,b)=>s+(b.donation||0),0);
+  const stats=[['Hotels',hotels.filter(h=>h.active).length],['Total Rooms',totRooms],['Total Capacity',totCap+' beds'],
+    ['Rooms Booked',roomsBooked],['Rooms Available',roomsAvail],['Pending Requests',pending],
+    ['Confirmed',confirmed],['Waitlisted',waitlist]];
+  const statCards=stats.map(([l,n])=>`<div class="stat"><div class="n">${n}</div><div class="l">${l}</div></div>`).join('');
+  const lastNight=prevDay(DB.rules.eventEnd);
+  const rangeSel=`<div class="flex" style="margin:2px 0 4px;gap:10px;align-items:center;flex-wrap:wrap">
+      <label style="font-weight:700">📅 Show for</label>
+      <input type="date" value="${dFrom}" min="${DB.rules.eventStart}" max="${lastNight}" onchange="setDashFrom(this.value)" style="max-width:165px" title="From night">
+      <span style="font-weight:600">→</span>
+      <input type="date" value="${dTo}" min="${dFrom}" max="${lastNight}" onchange="setDashTo(this.value)" style="max-width:165px" title="To night">
+      <span class="pill p-confirmed">${single?('1 night · '+fmtD(dFrom)):(nightsBetween(dFrom,dTo)+' nights · '+fmtD(dFrom)+' → '+fmtD(nextDay(dTo)))}</span>
+      <button class="btn gray sm" onclick="resetDashRange()">Whole festival</button></div>
+    <p class="subhead" style="margin-top:2px">Rooms Booked / Available and the table below reflect the busiest night in the chosen dates. Set both dates the same for a single night.</p>`;
+  const occ=hotels.map(h=>{ const gb=guestsBookedInHotel(h.id),cap=hotelCapacity(h);
+    const pct=cap?Math.round(gb/cap*100):0;
+    return `<tr><td>${esc(h.name)}${h.active?'':' <span class="muted">(inactive)</span>'}</td>
+      <td>${gb} / ${cap} beds</td>
+      <td><div class="bar"><span style="width:${pct}%"></span></div></td>
+      <td style="width:52px">${pct}%</td></tr>`; }).join('');
+  const isStaff = !seeMoney();   // VCM cannot see donation amounts
+  const donationCard = isStaff ? '' : `<div class="card"><h2 class="section">🧾 Donations</h2>
+        <div class="grid g2">
+          <div class="stat"><div class="n">${money(totDon)}</div><div class="l">Total pledged</div></div>
+          <div class="stat"><div class="n">${money(verifDon)}</div><div class="l">With receipt</div></div>
+        </div>
+        <p class="muted" style="margin-top:14px">${bk.filter(b=>b.receipt).length} of ${bk.length} bookings have a receipt uploaded.</p>
+      </div>`;
+  // Only guest houses that can host a stay STARTING on the selected date are shown (each covers until it closes); per-night caps respected.
+  const capType=(h,r,oe)=>{ let mn=Infinity; for(let d=dFrom; d<oe; d=nextDay(d)){ const c=roomCapOnNight(h,r.type,d); if(c<mn)mn=c; } return mn===Infinity?0:mn; };
+  const availRows=hotelsByPriority().filter(h=>h.active && hotelOriginEnd(h,dFrom,dWinEnd)!==null).map(h=>{
+    const oe=hotelOriginEnd(h,dFrom,dWinEnd);
+    const freeRooms=h.rooms.reduce((s,r)=>s+freeRoomsForStay(h,r.type,dFrom,oe),0);
+    const capTotal=h.rooms.reduce((s,r)=>s+capType(h,r,oe),0);
+    const untilTag = oe<dWinEnd ? ` <span class="muted" style="font-size:11px">(available until ${fmtD(oe)})</span>` : '';
+    const byType=h.rooms.map(r=>{const f=freeRoomsForStay(h,r.type,dFrom,oe); return `${esc(r.type)} ${f}`;}).join(' · ');
+    return `<tr><td><b>${esc(h.name)}</b>${untilTag}<div class="muted">${byType} free</div></td>
+      <td><b style="color:${freeRooms>0?'var(--green)':'var(--red)'}">${freeRooms}</b> <span class="muted">/ ${capTotal}</span></td></tr>`; }).join('')
+    || `<tr><td colspan="2" class="muted">No guest house is available on ${fmtD(dFrom)}.</td></tr>`;
+  const availCard=`<div class="card"><h2 class="section">🛏️ Rooms available by guest house</h2>
+    <p class="subhead">Only guest houses available for the selected dates (${single?fmtD(dFrom):(fmtD(dFrom)+' → '+fmtD(nextDay(dTo)))}) are shown, with rooms free that day.</p>
+    <table><thead><tr><th>Guest house</th><th>Rooms free</th></tr></thead><tbody>${availRows}</tbody></table></div>`;
+  return `<div class="card"><h2 class="section">📊 Dashboard</h2>
+      ${rangeSel}
+      <div class="grid g4">${statCards}</div></div>
+    ${availCard}
+    ${donationCard}`;
+}
+
+/* ---------------- Shared allocation editor cell ---------------- */
+function allocCell(b){
+  const hotelSel=hotelsForDropdown().map(h=>{
+    const tag= seeMoney() ? (h.minDonation>0?` [P${h.priority||'-'} · min ${money(h.minDonation)}]`:` [P${h.priority||'-'}]`) : '';
+    return `<option value="${h.id}" ${b.hotel===h.id?'selected':''}>${esc(h.name)}${tag}</option>`; }).join('');
+  const selHotel=DB.hotels.find(h=>h.id===b.hotel);
+  const selOEnd=selHotel?hotelOriginEnd(selHotel,b.checkin,b.checkout):null;
+  const rtypes=(selHotel||{rooms:[]}).rooms
+    .map(r=>`<option value="${r.type}" ${b.roomType===r.type?'selected':''}>${r.type} · ${(selHotel&&selOEnd)?freeRoomsForStay(selHotel,r.type,b.checkin,selOEnd,b.id):0} free</option>`).join('');
+  const roomObj=selHotel&&b.roomType?selHotel.rooms.find(r=>r.type===b.roomType):null;
+  const beds=roomObj?(b.rooms*roomObj.cap+(b.extraBeds||0)):0;
+  const meta=[];
+  if(roomObj) meta.push(`${beds} beds / ${b.count} ppl ${beds>=b.count?'✅':'⚠ short'}`);
+  if(selHotel&&selHotel.minDonation>0&&b.donation<selHotel.minDonation) meta.push(`<span style="color:var(--red)">⚠ ${seeMoney()?'below '+money(selHotel.minDonation)+' min':'guest not eligible for this house'}</span>`);
+  if(selHotel&&!selHotel.extraBedding&&b.extraRequested>0) meta.push(`<span style="color:var(--red)">no extra bed (asked ${b.extraRequested})</span>`);
+  const metaLine=meta.length?`<div class="a-meta">${meta.join(' · ')}</div>`:'';
+  // Braj Nidhi continuation room for split/extended stays (past the origin hotel's cutoff)
+  let transferCtl='';
+  const split=staySplit(b);
+  if(split){
+    const tp=transferPlan(b);
+    const braj=DB.hotels.find(h=>h.id==='h1')||{rooms:[]};
+    const tOpts=braj.rooms.map(r=>`<option value="${r.type}" ${tp.type===r.type?'selected':''}>${r.type} · ${vacantRooms('h1',r.type,r.count,b)} free</option>`).join('');
+    const tObj=braj.rooms.find(r=>r.type===tp.type);
+    const tbeds=tObj?tp.rooms*tObj.cap:0;
+    const auto=!b.transferRoomType?'<span class="muted" style="font-size:11px"> · auto</span>':'';
+    const roomPicker=`<select class="a-sel" onchange="setField('${b.id}','transferRoomType',this.value)"><option value="">— select room —</option>${tOpts}</select>
+       <div class="a-row"><span class="a-lbl">Rooms</span>
+         <div class="stepper"><button onclick="stepTransfer('${b.id}',-1)">−</button><input type="number" min="0" value="${tp.rooms}" onchange="setField('${b.id}','transferRooms',this.value)"><button onclick="stepTransfer('${b.id}',1)">+</button></div></div>
+       <div class="a-meta">${tbeds} beds / ${b.count} ppl ${tbeds>=b.count?'✅':'⚠ short'}</div>`;
+    if(split.length===1 && split[0].fullTransfer){
+      // Origin house is closed for the whole stay → the guest can only be in Braj Nidhi
+      transferCtl=`<div class="a-transfer" style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--border)">
+         <div style="color:var(--red);font-weight:700;font-size:12.5px;margin-bottom:6px">⚠ ${esc(hotelName(b.hotel))} is closed for ${fmtD(b.checkin)}→${fmtD(b.checkout)} — the whole stay must be in Braj Nidhi.</div>
+         <button class="btn sm" style="margin-bottom:8px" onclick="fixClosedHotel('${b.id}')">↪ Move this booking to Braj Nidhi</button>
+         <div class="a-lbl" style="margin-bottom:4px">Braj Nidhi room${auto}</div>
+         ${roomPicker}</div>`;
+    } else {
+      transferCtl=`<div class="a-transfer" style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--border)">
+         <div class="a-lbl" style="margin-bottom:4px">② Braj Nidhi from ${fmtD(split[1].from)}${auto}</div>
+         ${roomPicker}</div>`;
+    }
+  }
+  const extraCtl=(selHotel&&selHotel.extraBedding)
+    ? `<span class="a-lbl" style="margin-left:6px">Extra</span>
+       <input class="a-num" type="number" min="0" value="${b.extraBeds||0}" title="extra beds" onchange="setField('${b.id}','extraBeds',this.value)">
+       ${b.extraRequested>0?`<span class="a-ask">asked ${b.extraRequested}</span>`:''}` : '';
+  const gt=b.guestType||'FR';
+  let seva;
+  if(gt!=='FR'){ seva=`<div class="seva-free">🎫 ${esc(gt)} guest — no room payment required</div>`; }
+  else if(b.donation>=DB.rules.freeMin){ seva=`<div class="seva-free">🙏 Eligible for free accommodation${seeMoney()?` — donation ₹${Number(DB.rules.freeMin).toLocaleString('en-IN')} or above`:''}</div>`; }
+  else { const selCh = b.sevaChannel || (staffCollects(b) ? 'GPP' : 'Devotee');   // pre-fill from the devotee's own choice on the booking form
+    seva=`<div class="seva-collect ${b.sevaCollected?'done':''}">
+       <span style="white-space:nowrap;font-weight:700">${b.sevaCollected?'✅ Seva by':'⚠ Seva by'}</span>
+       <select onchange="setSevaChannel('${b.id}',this.value)" style="flex:1;min-width:0;font-size:12.5px;padding:5px 7px">
+         <option value="">— not yet —</option>
+         <option value="GPP" ${selCh==='GPP'?'selected':''}>GPP's Team (Staff)</option>
+         <option value="Devotee" ${selCh==='Devotee'?'selected':''}>Devotee — ${esc(devoteeName(b))}</option>
+       </select></div>`; }
+  return `<div class="alloc">
+      <select class="a-sel" onchange="setField('${b.id}','hotel',this.value)"><option value="">— select hotel —</option>${hotelSel}</select>
+      <select class="a-sel" onchange="setField('${b.id}','roomType',this.value)"><option value="">— select room type —</option>${rtypes}</select>
+      <div class="a-row"><span class="a-lbl">Rooms</span>
+        <div class="stepper"><button onclick="stepRooms('${b.id}',-1)">−</button><input type="number" min="0" value="${b.rooms||0}" onchange="setField('${b.id}','rooms',this.value)"><button onclick="stepRooms('${b.id}',1)">+</button></div>
+        ${extraCtl}</div>
+      ${metaLine}${transferCtl}${seva}</div>`;
+}
+/* Dates cell: Super Admin / VCM get editable check-in & check-out per stay (to shorten/adjust before confirming); others see read-only text. */
+function dateEditHTML(b){
+  const dates=stayLabel(b);
+  if(!(isSuper()||isVcm())) return dates?`<div class="muted" style="color:var(--saffron-dark)">${dates}</div>`:'';
+  const eS=DB.rules.eventStart, lastIn=prevDay(DB.rules.eventEnd), eE=DB.rules.eventEnd;
+  const stays=(b.stays&&b.stays.length)?b.stays:[{checkin:b.checkin,checkout:b.checkout}];
+  const rows=stays.map((s,i)=>`<span style="display:inline-flex;gap:4px;align-items:center;margin:2px 8px 2px 0">${stays.length>1?`<b>R${i+1}</b> `:''}<input type="date" value="${s.checkin||''}" min="${eS}" max="${lastIn}" onchange="setStayDate('${b.id}',${i},'checkin',this.value)" style="padding:2px 5px;font-size:12px"> → <input type="date" value="${s.checkout||''}" min="${s.checkin||eS}" max="${eE}" onchange="setStayDate('${b.id}',${i},'checkout',this.value)" style="padding:2px 5px;font-size:12px"></span>`).join('');
+  return `<div class="rooms-mini" style="margin-top:5px;color:var(--saffron-dark)">📅 <b>Stay dates</b> (editable): ${rows}</div>`;
+}
+function setStayDate(id,i,which,val){ const b=DB.bookings.find(x=>x.id===id); if(!b || !(isSuper()||isVcm())) return;
+  const eS=DB.rules.eventStart, eE=DB.rules.eventEnd, lastIn=prevDay(eE);
+  if(!(b.stays&&b.stays.length)) b.stays=[{checkin:b.checkin,checkout:b.checkout,extra:(b.extraRequested>0)}];
+  const s=b.stays[i]; if(!s) return;
+  if(!b.datesModified){ b.origStays=JSON.parse(JSON.stringify(b.stays)); b.datesModified=true; }   // keep the devotee's original request to show the change
+  if(which==='checkin'){
+    if(val && (val<eS||val>lastIn)){ toast('⚠ Invalid check-in — must be '+fmtD(eS)+' to '+fmtD(lastIn)); render(); return; }
+    s.checkin=val; if(val && s.checkout && s.checkout<=val) s.checkout=nextDay(val);
+  } else {
+    if(val && val>eE){ toast('⚠ Invalid check-out — must be by '+fmtD(eE)); render(); return; }
+    if(val && s.checkin && val<=s.checkin){ toast('Check-out must be after check-in'); render(); return; }
+    s.checkout=val;
+  }
+  if(i===0){ b.checkin=b.stays[0].checkin; b.checkout=b.stays[0].checkout; }
+  markEdited(b, 'Stay dates → '+b.stays.map((x,ix)=>'R'+(ix+1)+' '+(x.checkin||'?')+'→'+(x.checkout||'?')).join(', '));
+  save(); render(); toast('Stay dates updated');
+}
+function guestCell(b,withSug){
+  const prefTxt=b.preferred&&b.preferred.length?b.preferred.map(hotelName).join(', '):'—';
+  let sugHTML='';
+  if(withSug){ const list=suggestAllocations(b);
+    sugHTML=list.length
+      ? list.map(s=>`<div class="rooms-mini" style="margin-top:4px;color:var(--saffron-dark)">💡 <b>${s.label}:</b> ${esc(s.hotel.name)} · ${esc(s.roomType)} × ${s.rooms}${s.extra>0?` + ${s.extra} extra bed`:''}
+           <button class="btn sm" style="padding:2px 9px;margin-left:4px" onclick="applySuggestion('${b.id}','${s.label.toLowerCase()}')">Apply</button></div>`).join('')
+      : `<div class="rooms-mini" style="margin-top:5px;color:var(--red)">💡 No eligible hotel with free rooms (check donation/min or availability)</div>`; }
+  const reqRoomsTxt=b.roomsRequested>0?` · 🚪 ${b.roomsRequested} separate room(s) requested`:'';
+  const dates=stayLabel(b);
+  const catTag = (b.guestType&&b.guestType!=='FR') ? ' <span class="pill p-waitlist">'+esc(b.guestType)+'</span>' : ' '+catBadge(b);
+  const fullTag = (b.bookedWhenFull && !b.hotel && b.status!=='confirmed') ? ' <span class="pill p-waitlist" title="Booked while all rooms were full">🕓 waitlist</span>' : '';
+  return `<b>${headLabel(b)}</b>${catTag}${fullTag}${editedTag(b)}${b.receiptWrong?' <span class="pill p-rejected">✗ receipt wrong</span>':''}<div class="muted">requested by ${esc(devoteeName(b))}${b.phone?` · 📱 ${esc(b.phone)}`:''}</div>
+      <div class="muted">${peopleLabel(b)}${b.family?' · 👪 family':''}${b.extraRequested>0?` · 🛏️ ${b.extraRequested} extra bed requested`:''}${reqRoomsTxt}</div>
+      ${dateEditHTML(b)}
+      ${b.note?`<div class="muted" style="background:#fff4e4;border-radius:6px;padding:4px 8px;margin-top:4px">📝 ${esc(b.note)}</div>`:''}${sugHTML}`;
+}
+
+/* ---------------- Admin: New Requests (not yet confirmed) ---------------- */
+function reqSortVal(b){ const gt=b.guestType||'FR'; return (gt==='PR'||gt==='Media')?Infinity:(b.donation||0); }  // PR/Media on top, then by donation
+let reqSort='priority', bookedSort='priority';
+function setReqSort(v){ reqSort=v; render(); }
+/* Requests filter — by receipt approval or donation band (VCM sees the category floor; Super Admin the exact amount). */
+let reqFilter='all';
+function setReqFilter(v){ reqFilter=v; render(); }
+function reqFilterMatch(b){ const d=Number(b.donation)||0;
+  switch(reqFilter){
+    case 'approved': return !!b.donationVerified;
+    case 'above25L': return d>=250000;
+    case 'above50k': return d>=50000;
+    case 'band50to25L': return d>=50000 && d<250000;
+    case 'below50k': return d<50000;
+    case 'below25k': return d<25000;
+    default: return true; } }
+function reqFilterMenu(){ const o=(v,l)=>`<option value="${v}"${reqFilter===v?' selected':''}>${l}</option>`;
+  return `<select onchange="setReqFilter(this.value)" style="max-width:235px">${o('all','Filter: All')}${o('approved','Receipt verified')}${o('above25L','Donation ≥ ₹2.5 Lakh')}${o('above50k','Donation ≥ ₹50k')}${o('band50to25L','₹50k – below ₹2.5 Lakh')}${o('below50k','Donation below ₹50k')}${o('below25k','Donation below ₹25k')}</select>`; }
+function setBookedSort(v){ bookedSort=v; render(); }
+function sortBookings(list,mode){ const l=[...list];
+  if(mode==='amtHigh') l.sort((a,c)=>(c.donation||0)-(a.donation||0));
+  else if(mode==='amtLow') l.sort((a,c)=>(a.donation||0)-(c.donation||0));
+  else if(mode==='newest') l.sort((a,c)=>(c.created||0)-(a.created||0));     // most recently submitted first
+  else if(mode==='oldest') l.sort((a,c)=>(a.created||0)-(c.created||0));     // earliest submitted first
+  else if(mode==='dateEarly') l.sort((a,c)=>(a.checkin||'').localeCompare(c.checkin||''));
+  else if(mode==='dateLate') l.sort((a,c)=>(c.checkin||'').localeCompare(a.checkin||''));
+  else l.sort((a,c)=>{ const da=(a.status==='pending'||a.status==='waitlist')?0:1, dc=(c.status==='pending'||c.status==='waitlist')?0:1; if(da!==dc)return da-dc; return reqSortVal(c)-reqSortVal(a); });
+  return l; }
+function sortMenu(mode,fn){ const o=(v,l)=>`<option value="${v}" ${mode===v?'selected':''}>${l}</option>`;
+  return `<select onchange="${fn}(this.value)" style="max-width:210px">${o('priority','Sort: Priority')}${o('newest','Request: Newest first')}${o('oldest','Request: Oldest first')}${o('amtHigh','Amount: High → Low')}${o('amtLow','Amount: Low → High')}${o('dateEarly','Stay date: Earliest first')}${o('dateLate','Stay date: Latest first')}</select>`; }
+function viewRequests(){
+  const list=sortBookings(DB.bookings.filter(b=>b.status!=='confirmed').filter(reqFilterMatch), reqSort);
+  const activeCount=list.filter(b=>b.status==='pending'||b.status==='waitlist').length;
+  const rows=list.map(b=>{
+    const dead=b.status==='cancelled'||b.status==='withdrawn'||b.status==='rejected';
+    return `<tr id="row-${b.id}" data-search="${esc(((b.head||'')+' '+(b.phone||'')+' '+(b.brahmachari||'')+' '+devoteeName(b)+' '+(b.devId||'')).toLowerCase())}"${dead?' style="opacity:.6"':''}>
+      <td>${guestCell(b,!dead)}</td>
+      <td>${donDisplay(b)}<div class="muted">${donSub(b)}</div></td>
+      <td>${statusPill(b.status)}</td>
+      <td>${dead?'<span class="muted">room released</span>':allocCell(b)}</td>
+      <td><div class="row-actions">${dead
+        ? `<button class="btn gray sm" onclick="setStatus('${b.id}','pending')">Reopen</button>`
+        : `<button class="btn green sm" onclick="approve('${b.id}')">Confirm</button>
+           <button class="btn gray sm" onclick="approveLock('${b.id}')">🔒 Lock &amp; Confirm</button>
+           ${isSuper()?`<button class="btn gray sm" onclick="approveNoReceipt('${b.id}')" title="Super Admin override">Confirm without receipt</button>`:''}
+           <button class="btn gray sm" onclick="setStatus('${b.id}','waitlist')">Waitlist</button>
+           <button class="btn red sm" onclick="setStatus('${b.id}','rejected')">Reject</button>`}
+      </div></td></tr>`; }).join('');
+  return `<div class="card"><h2 class="section">🆕 New Requests <span class="pill p-pending">${activeCount}</span></h2>
+    <p class="subhead">Pick hotel → room type → adjust rooms → Confirm. Use <b>🔒 Lock &amp; Confirm</b> to confirm and protect it from auto-reallocation. Cancelled/pulled-back requests show greyed out with their room released.</p>
+    <div class="flex" style="margin-bottom:12px;gap:10px;flex-wrap:wrap"><input placeholder="🔍 Search by guest name, number or devotee name" value="${esc(searchQ['reqRows']||'')}" oninput="setSearch('reqRows',this.value)" style="flex:1;min-width:220px">${sortMenu(reqSort,'setReqSort')}${reqFilterMenu()}</div>
+    <div class="scrollx"><table><thead><tr><th>Request</th><th>Donation</th><th>Status</th><th>Allocation</th><th>Action</th></tr></thead>
+      <tbody id="reqRows">${rows||'<tr><td colspan="5" class="muted">No pending requests 🎉</td></tr>'}</tbody></table></div></div>`;
+}
+
+/* ---------------- Admin: Booked (confirmed, editable) ---------------- */
+function viewBooked(){
+  const list=sortBookings(DB.bookings.filter(b=>b.status==='confirmed'), bookedSort);
+  const rows=list.map(b=>`<tr id="row-${b.id}" data-search="${esc(((b.head||'')+' '+(b.phone||'')+' '+(b.brahmachari||'')+' '+devoteeName(b)+' '+(b.devId||'')+' '+hotelName(b.hotel)).toLowerCase())}">
+      <td>${guestCell(b,false)}${b.locked?' <span class="pill p-waitlist">🔒 locked</span>':''}${b.confirmedWithoutReceipt?' <span class="pill p-rejected">⚠ no verified receipt</span>':''}</td>
+      <td>${donDisplay(b)}</td>
+      <td>${allocDetailHTML(b)}</td>
+      <td>${allocCell(b)}</td>
+      <td><div class="row-actions">
+        <button class="btn green sm" onclick="approve('${b.id}')">Save changes</button>
+        <button class="btn gray sm" onclick="toggleLock('${b.id}')">${b.locked?'🔓 Unlock':'🔒 Lock'}</button>
+        <button class="btn gray sm" onclick="setStatus('${b.id}','pending')">Move to pending</button>
+      </div></td></tr>`).join('');
+  return `<div class="card"><h2 class="section">✅ Booked <span class="pill p-confirmed">${list.length}</span></h2>
+    <p class="subhead">These are confirmed. Edit the allocation and press <b>Save changes</b>. <b>Lock</b> a booking to protect it from automatic reallocation and swaps.</p>
+    <div class="flex" style="margin-bottom:12px;gap:10px"><input placeholder="🔍 Search by guest name, number, devotee or hotel" value="${esc(searchQ['bookedRows']||'')}" oninput="setSearch('bookedRows',this.value)" style="flex:1">${sortMenu(bookedSort,'setBookedSort')}</div>
+    <div class="scrollx"><table><thead><tr><th>Guest</th><th>Donation</th><th>Current allocation</th><th>Edit allocation</th><th>Action</th></tr></thead>
+      <tbody id="bookedRows">${rows||'<tr><td colspan="5" class="muted">No confirmed bookings yet.</td></tr>'}</tbody></table></div></div>`;
+}
+function toggleLock(id){ const b=DB.bookings.find(x=>x.id===id); if(!b)return; b.locked=!b.locked; save(); render(); toast(b.locked?'🔒 Locked — protected from auto-reallocation':'🔓 Unlocked'); }
+function approveLock(id){ approve(id); const b=DB.bookings.find(x=>x.id===id);
+  if(b && b.status==='confirmed'){ b.locked=true; save(); render(); toast('✓ Confirmed & 🔒 locked — protected from auto-reallocation'); } }
+
+/* ---------------- Admin: Braj Nidhi reallocation & swaps ---------------- */
+const BRAJ_ID='h1';
+let reallocPlan=null, swapPreview=null;
+/* Compute which outside bookings can be moved into Braj Nidhi, by donation then date, whole-group-fits only. */
+function computeRealloc(){
+  const braj=DB.hotels.find(h=>h.id===BRAJ_ID); if(!braj) return [];
+  const eligible=DB.bookings.filter(b=>b.status==='confirmed'&&b.hotel!==BRAJ_ID&&!b.locked)
+    .sort((a,b)=> (b.donation||0)-(a.donation||0) || (a.created||0)-(b.created||0));
+  const reserved={}; const moves=[];
+  for(const b of eligible){
+    const avail=braj.rooms.map(r=>({type:r.type,cap:r.cap,
+      free:Math.max(0, r.count - roomsAssignedByType(BRAJ_ID,r.type) - (reserved[r.type]||0))}))
+      .filter(r=>r.free>0).sort((a,c)=>c.cap-a.cap);
+    let remaining=b.count; const plan=[];
+    for(const r of avail){ if(remaining<=0)break; const take=Math.min(r.free,Math.ceil(remaining/r.cap)); if(take>0){plan.push({type:r.type,rooms:take}); remaining-=take*r.cap;} }
+    if(remaining<=0){ plan.forEach(p=>reserved[p.type]=(reserved[p.type]||0)+p.rooms);
+      moves.push({id:b.id,head:b.head,count:b.count,donation:b.donation,fromHotel:hotelName(b.hotel),plan}); }
+  }
+  return moves;
+}
+function startRealloc(){ reallocPlan=computeRealloc(); swapPreview=null; render();
+  if(!reallocPlan.length) toast('No eligible booking fully fits Braj Nidhi right now'); }
+function cancelRealloc(){ reallocPlan=null; render(); }
+function confirmRealloc(){ if(!reallocPlan) return;
+  reallocPlan.forEach(m=>{ const b=DB.bookings.find(x=>x.id===m.id); if(!b||b.locked)return;
+    b.hotel=BRAJ_ID; b.roomPlan=m.plan; b.roomType=m.plan[0].type; b.rooms=m.plan.reduce((s,p)=>s+p.rooms,0);
+    notify('edit',`Moved to Braj Nidhi: ${b.head} (${b.count} people)`, b.brahmachari, b.id); });
+  save(); const n=reallocPlan.length; reallocPlan=null; render(); toast(n+' booking(s) moved to Braj Nidhi'); }
+/* Priority mismatches: an outside group donated more than an inside Braj Nidhi group. */
+function priorityMismatches(){
+  const inside=DB.bookings.filter(b=>b.status==='confirmed'&&b.hotel===BRAJ_ID&&!b.locked).sort((a,b)=>(a.donation||0)-(b.donation||0));  // lowest donation first
+  const outside=DB.bookings.filter(b=>b.status==='confirmed'&&b.hotel!==BRAJ_ID&&!b.locked).sort((a,b)=>(b.donation||0)-(a.donation||0)); // highest donation first
+  const pairs=[]; const used=new Set();
+  outside.forEach(o=>{ const i=inside.find(x=>!used.has(x.id)&&(o.donation||0)>(x.donation||0));   // each outside gets a DISTINCT lower-donation inside guest
+    if(i){ used.add(i.id); pairs.push({o,i,diff:(o.donation||0)-(i.donation||0)}); } });
+  return pairs;
+}
+function startSwap(oId,iId){ const o=DB.bookings.find(x=>x.id===oId), i=DB.bookings.find(x=>x.id===iId);
+  if(!o||!i){ toast('Booking not found'); return; }
+  if(o.locked||i.locked){ toast('One of these bookings is locked — unlock it first'); return; }
+  const planO=packGroup(BRAJ_ID,o.count,iId);          // outside group into Braj Nidhi with inside group's rooms freed
+  const planI=packGroup(o.hotel,i.count,oId);          // inside group into the outside hotel with outside group's rooms freed
+  if(!planO){ toast(o.head+' cannot fully fit in Braj Nidhi even after freeing the other group'); return; }
+  if(!planI){ toast(i.head+' cannot fully fit in '+hotelName(o.hotel)); return; }
+  swapPreview={oId,iId,oHotel:o.hotel,planO,planI}; reallocPlan=null; render();
+}
+function cancelSwap(){ swapPreview=null; render(); }
+function confirmSwap(){ if(!swapPreview) return; const s=swapPreview;
+  const o=DB.bookings.find(x=>x.id===s.oId), i=DB.bookings.find(x=>x.id===s.iId); if(!o||!i) return;
+  i.hotel=s.oHotel; i.roomPlan=s.planI; i.roomType=s.planI[0].type; i.rooms=s.planI.reduce((a,p)=>a+p.rooms,0);
+  o.hotel=BRAJ_ID; o.roomPlan=s.planO; o.roomType=s.planO[0].type; o.rooms=s.planO.reduce((a,p)=>a+p.rooms,0);
+  notify('edit',`Swapped into Braj Nidhi: ${o.head} (out: ${i.head})`, o.brahmachari, o.id);
+  save(); swapPreview=null; render(); toast('Swap done — '+o.head+' is now in Braj Nidhi'); }
+function planText(plan){ return plan.map(p=>`${p.type} × ${p.rooms}`).join(' + '); }
+function viewBraj(){
+  const braj=DB.hotels.find(h=>h.id===BRAJ_ID);
+  if(!braj) return `<div class="card"><p class="muted">Braj Nidhi hotel not found.</p></div>`;
+  const freeRows=braj.rooms.map(r=>{ const free=Math.max(0,r.count-peakRoomsUsed(BRAJ_ID,r.type));
+    return `<tr><td>${esc(r.type)}</td><td>${r.count}</td><td><b style="color:${free>0?'var(--green)':'var(--red)'}">${free}</b></td></tr>`; }).join('');
+  const totFree=braj.rooms.reduce((s,r)=>s+Math.max(0,r.count-peakRoomsUsed(BRAJ_ID,r.type)),0);
+  // preview blocks
+  let previewBlock='';
+  if(reallocPlan){ previewBlock = reallocPlan.length
+    ? `<div class="card" style="border:2px solid var(--saffron)"><h2 class="section">Preview — moving to Braj Nidhi (${reallocPlan.length})</h2>
+        <table><thead><tr><th>Booking</th><th>People</th><th>Donation</th><th>From</th><th>Proposed Braj Nidhi rooms</th></tr></thead>
+        <tbody>${reallocPlan.map(m=>`<tr><td><b>${esc(m.head)}</b></td><td>${m.count}</td><td>${donDisplay(m)}</td><td>${esc(m.fromHotel)}</td><td>${esc(planText(m.plan))}</td></tr>`).join('')}</tbody></table>
+        <div class="flex" style="margin-top:12px"><button class="btn green" onclick="confirmRealloc()">✓ Confirm Reallocation</button>
+          <button class="btn gray" onclick="cancelRealloc()">Cancel</button></div></div>`
+    : `<div class="card"><p class="muted">No eligible booking fully fits Braj Nidhi right now.</p></div>`; }
+  if(swapPreview){ const s=swapPreview; const o=DB.bookings.find(x=>x.id===s.oId), i=DB.bookings.find(x=>x.id===s.iId);
+    previewBlock += `<div class="card" style="border:2px solid var(--saffron)"><h2 class="section">Preview — Swap</h2>
+      <p><b>${esc(o.head)}</b> (${o.count} ppl · ${donDisplay(o)}) moves INTO Braj Nidhi → ${esc(planText(s.planO))}</p>
+      <p><b>${esc(i.head)}</b> (${i.count} ppl · ${donDisplay(i)}) moves OUT to ${esc(hotelName(s.oHotel))} → ${esc(planText(s.planI))}</p>
+      <div class="flex" style="margin-top:10px"><button class="btn green" onclick="confirmSwap()">✓ Confirm Swap</button>
+        <button class="btn gray" onclick="cancelSwap()">Cancel</button></div></div>`; }
+  // priority mismatches
+  const mm=priorityMismatches();
+  const seen=new Set();
+  const mmRows=mm.filter(p=>{ const k=p.o.id; if(seen.has(k))return false; seen.add(k); return true; }).map(p=>`<tr>
+      <td><b>${esc(p.o.head)}</b> <span class="pill p-pending">outside</span><div class="muted">${donDisplay(p.o)} · ${esc(hotelName(p.o.hotel))}</div></td>
+      <td>vs <b>${esc(p.i.head)}</b> <span class="pill p-confirmed">in Braj Nidhi</span><div class="muted">${donDisplay(p.i)}</div></td>
+      <td>${p.o.locked||p.i.locked?'<span class="muted">🔒 locked</span>':`<button class="btn sm" onclick="startSwap('${p.o.id}','${p.i.id}')">Swap with Braj Nidhi guest →</button>`}</td></tr>`).join('');
+  // Who is currently staying in Braj Nidhi, split by payment level (below ₹50k vs ₹50k+)
+  const occ=DB.bookings.filter(b=>b.hotel===BRAJ_ID && b.status==='confirmed');
+  const occRow=b=>`<tr>
+    <td data-label="Guest"><b>${esc(headLabel(b))}</b><div class="muted">${esc(peopleLabel(b))}${b.brahmachari?' · by '+esc(devoteeName(b)):''}</div></td>
+    <td data-label="Donation">${donDisplay(b)}</td>
+    <td data-label="Payment level">${isFreeStay(b)?'<span class="pill p-confirmed">₹50k+ · free stay</span>':'<span class="pill p-pending">Below ₹50k · seva</span>'}</td>
+    <td data-label="Room">${b.roomType?esc(allocSummary(b)):'—'}</td>
+    <td data-label="Dates">${esc(stayLabel(b)||'—')}</td></tr>`;
+  const lowN=occ.filter(b=>!isFreeStay(b)).length, highN=occ.filter(isFreeStay).length;
+  const brajOccBlock=`<div class="card"><h2 class="section">🛏️ Staying in Braj Nidhi <span class="pill p-confirmed">${occ.length}</span></h2>
+    <p class="subhead">Everyone allocated in Braj Nidhi — <b>${highN}</b> paid ₹50,000+ (free stay) and <b>${lowN}</b> paid below ₹50,000 (seva). A clear picture of who is inside.</p>
+    <div class="scrollx"><table class="stack-mobile"><thead><tr><th>Guest / Family</th><th>Donation</th><th>Payment level</th><th>Room</th><th>Dates</th></tr></thead>
+      <tbody>${occ.map(occRow).join('')||'<tr><td colspan="5" class="muted">No one allocated in Braj Nidhi yet</td></tr>'}</tbody></table></div></div>`;
+  return `<div class="card"><h2 class="section">🏠 Braj Nidhi — Reallocation</h2>
+      <p class="subhead">Our own guest house. Fill it by donation priority (highest first, then earliest booking). A whole booking always stays in one hotel — never split.</p>
+      <div class="flex"><button class="btn" onclick="startRealloc()">⚡ Auto-Reallocate to Braj Nidhi</button>
+        <span class="pill ${totFree>0?'p-confirmed':'p-rejected'}">${totFree} rooms free</span></div></div>
+    ${previewBlock}
+    <div class="grid g2">
+      <div class="card"><h2 class="section">Braj Nidhi vacancy</h2>
+        <table><thead><tr><th>Room type</th><th>Total</th><th>Free</th></tr></thead><tbody>${freeRows}</tbody></table></div>
+      <div class="card"><h2 class="section">⚠ Higher-donation guests outside</h2>
+        <p class="subhead">Outside guests who donated more than someone currently inside Braj Nidhi.</p>
+        <table><tbody>${mmRows||'<tr><td class="muted">None — priority order looks correct 🎉</td></tr>'}</tbody></table></div>
+    </div>
+    ${brajOccBlock}`;
+}
+function stepRooms(id,delta){ const b=DB.bookings.find(x=>x.id===id); if(!b)return;
+  const wasConfirmed=b.status==='confirmed'; const oldRooms=b.rooms||0;
+  b.rooms=Math.max(0,(b.rooms||0)+delta); b.roomPlan=null;
+  if(wasConfirmed && (isSuper()||isVcm()) && b.rooms!==oldRooms) markEdited(b,'Rooms: '+oldRooms+' → '+b.rooms);
+  save(); render(); }
+function toggleSeva(id){ const b=DB.bookings.find(x=>x.id===id); if(!b)return; b.sevaCollected=!b.sevaCollected;
+  if(b.sevaCollected){ if(!b.sevaChannel)b.sevaChannel='GPP'; b.sevaDate=b.sevaDate||new Date().toISOString().slice(0,10); } save(); render(); }
+function setSevaChannel(id,v){ const b=DB.bookings.find(x=>x.id===id); if(!b)return;
+  if(v==='GuestHouse') v='GPP';   // VCM Guest House does not collect payment — always Staff/GPP
+  b.sevaChannel=v; b.sevaCollected=!!v; b.sevaDate = v ? (b.sevaDate||new Date().toISOString().slice(0,10)) : ''; save(); render();
+  if(v) toast('Seva marked received by '+(v==='GPP'?"GPP's Team (Staff)":'Devotee')); }
+/* Status shown to the devotee. A ₹50k+ donor (once receipt verified) is assured — status shows Confirmed
+   even while the actual room/location is still being allocated. Location appears only after allocation. */
+/* How many rooms a donation guarantees (rest depend on availability):
+   ₹11L+ → 3 · ₹5L+ → 2 · ₹2.5L+/₹1L+/₹50k+ → 1 · below ₹50k → 0 (no guarantee). */
+function guaranteedRooms(donation){
+  const d=Number(donation)||0;
+  if(d>=2500000) return 5;   // H1  ₹25L+
+  if(d>=1100000) return 3;   // H2  ₹11–25L
+  if(d>=500000) return 2;    // H3  ₹5–11L
+  if(d>=50000) return 1;     // H4 ₹2.5–5L / D2 ₹50k–2.5L
+  return 0;                  // D3  below ₹50k
+}
+/* Devotee-facing status text based on donation tier and rooms requested. */
+function guaranteeNote(b){
+  const R=Math.max(1, b.roomsRequested||1), G=guaranteedRooms(b.donation);
+  if(G<1) return '';
+  return R>G ? `${G} room${G>1?'s':''} confirmed · others depend on availability or contact concerned devotee`
+             : `${Math.min(R,G)} room${Math.min(R,G)>1?'s':''} confirmed`;
+}
+/* Below ₹2.5 L: the confirmed status and hotel/location are hidden from the devotee until
+   2 Sep 2026, 1:00 PM IST (rooms may be swapped by donation before then). ₹2.5 L+ shows immediately. */
+function locRevealed(b){
+  if((Number(b.donation)||0) >= (DB.rules.d1Min||250000)) return true;
+  return Date.now() >= Date.UTC(2026,8,2,7,30,0);   // 2 Sep 2026 13:00 IST
+}
+function devoteeStatusPill(b){
+  if(b.status==='cancelled'||b.status==='withdrawn'||b.status==='rejected') return statusPill(b.status);
+  if(!locRevealed(b)) return '<span class="pill p-pending">Pending</span>';   // below ₹2.5 L — held until 2 Sep 1 PM IST
+  if(b.status==='confirmed') return '<span class="pill p-confirmed">Confirmed</span>';
+  const waitNote = (b.bookedWhenFull && !b.hotel)
+    ? `<div class="rooms-mini" style="margin-top:4px;color:var(--amber);background:#fdf0dc;border:1px solid #f0d9b0;border-radius:8px;padding:4px 8px">🕓 Currently full — on the waiting list. A room may open if a guest doesn\'t arrive; you can also contact the guest house team.</div>`
+    : '';
+  const note=guaranteeNote(b);
+  let core;
+  if(note) core='<span class="pill p-confirmed">Confirmed</span><div class="rooms-mini" style="margin-top:3px">'+note+'</div>';
+  else if(b.sevaPlan==='kind') core='<span class="pill p-pending">Pending</span><div class="rooms-mini" style="margin-top:3px">In case of an important guest, contact concerned devotee</div>';
+  else core='<span class="pill p-pending">Pending</span>';
+  return core + waitNote; }
+/* accommodation payment status shown to the devotee */
+function sevaLabel(b){
+  if((b.guestType||'FR')!=='FR') return `<span class="pill p-confirmed">🎫 ${esc(b.guestType)}</span>`;   // PR / Media / Volunteer: no seva prompt
+  if(b.donation>=DB.rules.freeMin) return '<span class="pill p-confirmed">🙏 Free stay</span>';
+  return b.sevaCollected ? '<span class="pill p-confirmed">✅ Seva received</span>' : '<span class="pill p-pending">💰 Seva to be paid</span>'; }
+/* Record that a booking was edited: who (login id) + when + WHAT changed. Notifies admin/VCM; devotee sees it on My Requests. */
+function markEdited(b, note){ b.edited=true; b.editedAt=Date.now(); b.editedBy=USER.id; b.lastEditNote=note||'';
+  notify('edit', (b.head?b.head+' — ':'')+(note||'request edited')+' — by '+USER.id, b.brahmachari||'', b.id); }
+function editedTag(b){ if(!b.edited) return ''; const who=b.editedBy?('by '+esc(b.editedBy)):'by guest'; const when=b.editedAt?(' on '+fmtDT(b.editedAt)):''; const what=b.lastEditNote?('<div class="rooms-mini" style="color:var(--saffron-dark)">↪ '+esc(b.lastEditNote)+'</div>'):''; return ' <span class="pill p-edited">✏️ edited '+who+when+'</span>'+what; }
+function fieldLabel(f){ return {hotel:'Guest house',roomType:'Room type',rooms:'Rooms',extraBeds:'Extra beds',transferRoomType:'Braj Nidhi room',transferRooms:'Braj Nidhi rooms'}[f]||f; }
+function fieldVal(f,v){ return f==='hotel' ? (v?hotelName(v):'—') : ((v===''||v===undefined||v===null)?'—':v); }
+function setField(id,f,v){ const b=DB.bookings.find(x=>x.id===id); if(!b)return;
+  const wasConfirmed=b.status==='confirmed';
+  const isTransfer=(f==='transferRoomType'||f==='transferRooms');
+  const oldV = (f==='hotel') ? b.hotel : ((f==='transferRoomType'||f==='transferRooms') ? transferPlan(b)[f==='transferRoomType'?'type':'rooms'] : b[f]);
+  if(f==='rooms'||f==='extraBeds'||f==='transferRooms') b[f]=Math.max(0,parseInt(v)||0); else b[f]=v;
+  if(!isTransfer) b.roomPlan=null;   // manual edit overrides any multi-room auto plan (origin fields only)
+  if(f==='hotel'){ b.roomType=''; b.rooms=0; b.extraBeds=0; }
+  if(f==='roomType'){ const h=DB.hotels.find(x=>x.id===b.hotel); const r=h&&h.rooms.find(x=>x.type===v);
+    if(r&&(!b.rooms||b.rooms<1)) b.rooms=Math.ceil(b.count/r.cap); }  // auto-fill rooms needed
+  if(f==='transferRoomType'){ const r=brajRoomsList().find(x=>x.type===v); if(r) b.transferRooms=Math.max(1,Math.ceil((b.count||1)/r.cap)); }  // auto-fill Braj Nidhi rooms
+  const newV = (f==='hotel') ? b.hotel : ((f==='transferRoomType'||f==='transferRooms') ? transferPlan(b)[f==='transferRoomType'?'type':'rooms'] : b[f]);
+  if(wasConfirmed && (isSuper()||isVcm()) && String(oldV)!==String(newV)) markEdited(b, fieldLabel(f)+': '+fieldVal(f,oldV)+' → '+fieldVal(f,newV));
+  save();
+  if(['hotel','roomType','rooms','extraBeds','transferRoomType','transferRooms'].includes(f)) render(); }
+function stepTransfer(id,delta){ const b=DB.bookings.find(x=>x.id===id); if(!b)return;
+  const oldR=transferPlan(b).rooms; const nv=Math.max(0,oldR+delta); b.transferRooms=nv;
+  if(b.status==='confirmed' && (isSuper()||isVcm()) && oldR!==nv) markEdited(b,'Braj Nidhi rooms: '+oldR+' → '+nv);
+  save(); render(); }
+/* Move a booking whose origin house is closed for its whole stay straight into Braj Nidhi. */
+function fixClosedHotel(id){ const b=DB.bookings.find(x=>x.id===id); if(!b)return;
+  const tp=transferPlan(b); const oldHotel=hotelName(b.hotel);
+  b.hotel='h1'; b.roomType=tp.type; b.rooms=tp.rooms; b.roomPlan=null; b.transferRoomType=''; b.transferRooms=0;
+  if(b.status==='confirmed' && (isSuper()||isVcm())) markEdited(b,'Guest house: '+oldHotel+' (closed for these dates) → Braj Nidhi '+tp.type+' × '+tp.rooms);
+  save(); render(); toast('Moved to Braj Nidhi — '+tp.type+' × '+tp.rooms); }
+function approveNoReceipt(id){ if(!isSuper()){ toast('Only the Super Admin can confirm without a verified receipt'); return; } approve(id,true); }
+function approve(id,skipReceipt){ const b=DB.bookings.find(x=>x.id===id); if(!b)return;
+  const h=DB.hotels.find(x=>x.id===b.hotel);
+  if(!h||!b.roomType||!b.rooms){ toast('Pick a hotel, room type and at least 1 room first'); return; }
+  const gt=(b.guestType||'FR');
+  const isKindNoReceipt=(b.sevaPlan==='kind' && !b.receipt);   // Kind Donor without a receipt — no verification needed
+  const needsReceipt=(gt==='FR') && !isKindNoReceipt;   // PR / Media / Volunteer and Kind Donors (no receipt) don't need a verified receipt
+  if(gt!=='FR' && !isSuper()){ toast((b.guestType)+' bookings can only be confirmed by the Super Admin'); return; }
+  if(needsReceipt && !skipReceipt && !b.donationVerified){ toast(b.receiptWrong?'Receipt is marked WRONG — devotee must correct it (or use “Confirm without receipt”)':'Cannot confirm — verify the donation receipt first in the 🧾 Receipts panel'); return; }
+  b.confirmedWithoutReceipt = !!(skipReceipt && needsReceipt && !b.donationVerified);
+  const roomObj=h.rooms.find(r=>r.type===b.roomType);
+  const oEnd=hotelOriginEnd(h,b.checkin,b.checkout);
+  if(oEnd===null){ toast(h.name+' is not available on '+fmtD(b.checkin)+' — pick another guest house'); return; }
+  const avail=freeRoomsForStay(h,b.roomType,b.checkin,oEnd,id);   // free for the nights this hotel covers (rest continues in Braj Nidhi)
+  if(avail<=0){ toast('No '+b.roomType+' room free at '+h.name+' for '+fmtD(b.checkin)+'→'+fmtD(oEnd)+' — pick another room type or hotel'); return; }
+  if(b.rooms>avail){ toast('Only '+avail+' '+b.roomType+' room(s) free at '+h.name+' for these dates — reduce rooms to '+avail); return; }
+  if((b.extraBeds||0)>0 && !h.extraBedding){ toast(h.name+' does not allow extra bedding — set extra beds to 0'); return; }
+  // Room allotment is NEVER blocked by a pending seva payment. Staff-collect bookings just show "Payment due"
+  // and Staff (GPP's Team) can collect it later. Auto-mark the channel as Staff when it's not the devotee's own.
+  if(needsReceipt && b.donation<DB.rules.freeMin && !b.sevaCollected && b.sevaPlan!=='devotee' && !b.sevaChannel){ b.sevaChannel='GPP'; }
+  b.status='confirmed'; save(); render();
+  const extraMsg=(b.extraBeds||0)>0?` + ${b.extraBeds} extra bed`:'';
+  const cts=hotelSendContacts(h.id);
+  const ctMsg=cts.length?' · contact '+cts.map(c=>c.name+' '+c.phone).join(', '):'';
+  toast('✓ Confirmed: '+h.name+' · '+b.roomType+' × '+b.rooms+extraMsg+ctMsg+" — Confirmation updated on devotee's portal"); }
+function setStatus(id,s){ const b=DB.bookings.find(x=>x.id===id); if(!b)return; b.status=s; save(); render();
+  toast('Status: '+s+' — notification sent'); }
+
+/* ---------------- Admin: Hotels ---------------- */
+function viewHotels(){
+  const cards=hotelsByPriority().map(h=>{
+    const roomRows=h.rooms.map((r,i)=>{ const assigned=peakRoomsUsed(h.id,r.type), vac=Math.max(0,r.count-assigned);
+      const key=h.id+'_'+i, editing=editRoomKey===key;
+      if(editing) return `<tr>
+        <td><input id="er-type-${key}" value="${esc(r.type)}" style="width:130px"></td>
+        <td><input id="er-cap-${key}" type="number" min="1" value="${r.cap}" style="width:64px"></td>
+        <td><input id="er-count-${key}" type="number" min="0" value="${r.count}" style="width:64px"></td>
+        <td>${r.cap*r.count}</td>
+        <td>${assigned} used · <b>${vac} free</b></td>
+        <td class="row-actions"><button class="btn green sm" onclick="saveRoom('${h.id}',${i})">✓ Save</button>
+          <button class="btn gray sm" onclick="cancelEditRoom()">Cancel</button></td></tr>`;
+      return `<tr>
+        <td>${esc(r.type)}</td><td>${r.cap}</td><td>${r.count}</td>
+        <td>${r.cap*r.count}</td>
+        <td>${assigned} used · <b>${vac} free</b></td>
+        <td class="row-actions"><button class="btn gray sm" onclick="startEditRoom('${h.id}',${i})" title="Edit row">✏️</button>
+          <button class="btn red sm" onclick="delRoom('${h.id}',${i})" title="Delete row">✕</button></td></tr>`; }).join('');
+    return `<div class="card">
+      <div class="flex" style="justify-content:space-between">
+        <h2 class="section" style="margin:0">🏨 ${esc(h.name)} <span class="pill p-waitlist">Priority ${h.priority||'-'}</span>
+          <span class="pill ${h.extraBedding?'p-confirmed':'p-rejected'}">${h.extraBedding?'🛏️ extra bed OK':'no extra bed'}</span>
+          ${h.active?'':'<span class="pill p-rejected">inactive</span>'}</h2>
+        <div class="row-actions">
+          <button class="btn gray sm" onclick="toggleExtra('${h.id}')">${h.extraBedding?'Disable extra bed':'Allow extra bed'}</button>
+          <button class="btn gray sm" onclick="toggleHotel('${h.id}')">${h.active?'Deactivate':'Activate'}</button>
+          <button class="btn red sm" onclick="delHotel('${h.id}')">Delete</button>
+        </div>
+      </div>
+      ${isSuper()?`<div class="flex" style="margin:6px 0 4px">
+        <div><label style="margin:0">Priority (1 = highest)</label>
+          <input type="number" min="1" value="${h.priority||''}" style="width:110px" onchange="editHotel('${h.id}','priority',this.value)"></div>
+        <div><label style="margin:0">Min donation for this hotel (₹)</label>
+          <input type="number" min="0" value="${h.minDonation||0}" style="width:170px" onchange="editHotel('${h.id}','minDonation',this.value)"></div>
+      </div>`:'<p class="rooms-mini">Category & eligibility rules are managed by the Super Admin.</p>'}
+      ${isSuper()?`<div class="flex" style="margin:4px 0">
+        <div><label style="margin:0">Available until (date, optional)</label>
+          <input type="date" value="${h.availableUntil||''}" style="width:160px" onchange="editHotelText('${h.id}','availableUntil',this.value)"></div>
+        <div><label style="margin:0">After that, transfer guests to</label>
+          <select style="width:200px" onchange="editHotelText('${h.id}','transferTo',this.value)"><option value="">— none —</option>${DB.hotels.filter(x=>x.id!==h.id).map(x=>`<option value="${x.id}" ${h.transferTo===x.id?'selected':''}>${esc(x.name)}</option>`).join('')}</select></div>
+      </div>`:''}
+      ${h.availableUntil&&h.transferTo?`<p class="rooms-mini" style="color:var(--saffron-dark)">🔁 Available until ${fmtD(h.availableUntil)} — later dates auto-continue in ${esc(hotelName(h.transferTo))}</p>`:''}
+      <p class="rooms-mini">${isSuper()&&h.minDonation>0?'⭐ Reserved for donations ≥ '+money(h.minDonation)+' · ':''}${hotelRoomsTotal(h)} rooms · ${hotelCapacity(h)} beds · ${guestsBookedInHotel(h.id)} guests allocated</p>
+      <p class="rooms-mini" style="margin:0 0 4px">Press ✏️ to edit a room row (type, beds, number of rooms), then Save.</p>
+      <table><thead><tr><th>Room type</th><th>Beds</th><th>Rooms</th><th>Total beds</th><th>Vacancy</th><th></th></tr></thead>
+        <tbody>${roomRows||'<tr><td colspan="6" class="muted">No rooms yet</td></tr>'}</tbody></table>
+      <div class="flex" style="margin-top:10px">
+        <input id="rt-${h.id}" placeholder="type e.g. Family" style="flex:1">
+        <input id="rc-${h.id}" type="number" min="1" placeholder="beds" style="width:90px" value="2">
+        <input id="rn-${h.id}" type="number" min="1" placeholder="rooms" style="width:90px" value="10">
+        <button class="btn sm" onclick="addRoom('${h.id}')">+ Add room type</button>
+      </div>
+      ${isSuper()?availByDateHTML(h):''}
+      <div style="margin-top:14px">
+        <div class="rooms-mini" style="font-weight:700;margin-bottom:4px">📞 Contact persons <span class="muted">— tick up to 2 to show the guest on their confirmation</span></div>
+        ${(h.contacts&&h.contacts.length)?h.contacts.map((c,i)=>`<div class="flex" style="gap:8px;padding:4px 0;flex-wrap:nowrap">
+            <input type="checkbox" style="width:auto" ${c.send?'checked':''} onchange="toggleContactSend('${h.id}',${i})">
+            <b style="min-width:120px">${esc(c.name)}</b>
+            <span class="muted" style="flex:1">${esc(c.phone)}</span>
+            ${c.send?'<span class="pill p-confirmed">shown to guest</span>':''}
+            <button class="btn red sm" onclick="delContact('${h.id}',${i})">✕</button></div>`).join('')
+          :'<span class="muted">No contacts yet</span>'}
+        <div class="flex" style="margin-top:8px">
+          <input id="cn-${h.id}" placeholder="Contact name" style="flex:1">
+          <input id="cp-${h.id}" placeholder="Phone number" style="flex:1">
+          <button class="btn sm" onclick="addContact('${h.id}')">+ Add contact</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+  const addCard = isSuper()? `<div class="card"><h2 class="section">🏨 Add Hotel</h2>
+      <div class="grid g4" style="align-items:end">
+        <div><label>Hotel name</label><input id="newHotel" placeholder="e.g. VCM Guest House"></div>
+        <div><label>Priority (1 = highest)</label><input id="newPriority" type="number" min="1" value="3"></div>
+        <div><label>Min donation (₹, optional)</label><input id="newMinDon" type="number" min="0" value="0" placeholder="e.g. 250000"></div>
+        <div><label style="display:flex;gap:6px;align-items:center;margin-bottom:9px"><input id="newExtra" type="checkbox" style="width:auto"> Allow extra bedding</label>
+          <button class="btn" style="width:100%" onclick="addHotel()">Add Hotel</button></div>
+      </div>
+      <p class="muted" style="margin:10px 0 0">Category & eligibility rules are set in ⚙️ Settings. Tick "extra bedding" if this hotel can add extra beds to a room.</p>
+      </div>`:'';
+  return addCard+cards;
+}
+function addHotel(){ const n=$('#newHotel').value.trim(); if(!n){toast('Enter hotel name');return;}
+  DB.hotels.push({id:uid('h'),name:n,active:true,priority:parseInt($('#newPriority').value)||3,
+    minDonation:parseInt($('#newMinDon').value)||0,extraBedding:$('#newExtra').checked,rooms:[]}); save(); render(); toast('Hotel added'); }
+/* Re-evaluate pending requests against the CURRENT hotel criteria. Any tentative hotel a request no longer
+   qualifies for (donation below the hotel's min, or hotel inactive/removed) is reset so the fresh suggestion
+   recalculates. Returns how many were reset. */
+function recalcPending(){ let cleared=0; const reserved=reservedHotelIds();
+  DB.bookings.filter(b=>b.status==='pending'||b.status==='waitlist').forEach(b=>{
+    if(b.hotel){ const h=DB.hotels.find(x=>x.id===b.hotel);
+      const catBad = h && !isTopCat(guestCategory(b)) && reserved.includes(h.id);   // reserved hotel but guest not top-tier
+      if(!h || !h.active || (b.donation||0) < (h.minDonation||0) || catBad){
+        b.hotel=''; b.roomType=''; b.rooms=0; b.roomPlan=null; cleared++; } } });
+  return cleared; }
+function editHotel(id,f,v){ const h=DB.hotels.find(x=>x.id===id); if(!h)return; h[f]=parseInt(v)||0;
+  const cleared=recalcPending(); save(); render();
+  if(f==='minDonation') toast('Pending requests recalculated with the new donation criteria'+(cleared?` — ${cleared} allocation(s) reset`:'')); }
+function toggleExtra(id){ const h=DB.hotels.find(x=>x.id===id); h.extraBedding=!h.extraBedding; save(); render(); }
+function editHotelText(id,f,v){ const h=DB.hotels.find(x=>x.id===id); if(!h)return; h[f]=v; save(); render(); }
+function toggleHotel(id){ const h=DB.hotels.find(x=>x.id===id); h.active=!h.active; recalcPending(); save(); render(); }
+/* Log a hotel/room change to the shared log book + notify Super Admin and other VCM members */
+function roomLog(action, hname, detail){
+  const who = isVcm()?('VCM '+USER.id) : isSuper()?('Super Admin '+USER.id) : USER.id;
+  notify('log', who+' '+action+' '+esc(hname)+(detail?(' — '+detail):''), USER.name, '');
+}
+function delHotel(id){ const h=DB.hotels.find(x=>x.id===id); if(!h)return;
+  const reason=prompt('Remove the hotel "'+h.name+'"?\nThis deletes the hotel and clears its allocations.\n\nType a reason to confirm (required):');
+  if(reason===null || !reason.trim()){ toast('Cancelled — a reason is required to delete'); return; }
+  DB.hotels=DB.hotels.filter(x=>x.id!==id); recalcPending(); roomLog('deleted hotel', h.name, 'reason: '+reason.trim()); save(); render(); toast('Hotel removed — logged'); }
+function addRoom(id){ const h=DB.hotels.find(x=>x.id===id);
+  const t=$('#rt-'+id).value.trim(), c=parseInt($('#rc-'+id).value)||1, n=parseInt($('#rn-'+id).value)||1;
+  if(!t){toast('Enter room type');return;} h.rooms.push({type:t,cap:c,count:n}); save(); render(); }
+let editRoomKey=null;
+function startEditRoom(id,i){ editRoomKey=id+'_'+i; render(); }
+function cancelEditRoom(){ editRoomKey=null; render(); }
+function saveRoom(id,i){ const h=DB.hotels.find(x=>x.id===id); const r=h&&h.rooms[i]; if(!r)return;
+  const key=id+'_'+i; const oldCount=r.count, oldType=r.type;
+  const t=$('#er-type-'+key).value.trim();
+  const c=Math.max(1,parseInt($('#er-cap-'+key).value)||1);
+  const n=Math.max(0,parseInt($('#er-count-'+key).value)||0);
+  if(t) r.type=t; r.cap=c; r.count=n; editRoomKey=null;
+  if(n!==oldCount) roomLog('changed room quantity ('+oldType+') in', h.name, oldCount+' → '+n+' rooms');
+  save(); render(); toast('Room updated'+(n!==oldCount?' — logged':'')); }
+function delRoom(id,i){ const h=DB.hotels.find(x=>x.id===id); const r=h&&h.rooms[i]; if(!r)return;
+  const reason=prompt('Remove the room type "'+r.type+'" ('+r.count+' rooms) from '+h.name+'?\n\nType a reason to confirm (required):');
+  if(reason===null || !reason.trim()){ toast('Cancelled — a reason is required to remove a room'); return; }
+  h.rooms.splice(i,1); roomLog('removed room "'+r.type+'" from', h.name, 'reason: '+reason.trim()); save(); render(); toast('Room removed — logged'); }
+/* Super-Admin: per-date, per-room-type availability editor.
+   Shows a night × room-type grid. Each cell is the number of that room type available on that night
+   (blank/base = the room's default count). Editing a cell writes h.dayRooms[date][type]. */
+function availByDateHTML(h){
+  const nights=festivalNights();
+  if(!nights.length) return '';
+  if(!h.rooms||!h.rooms.length) return `<div style="margin-top:14px"><div class="rooms-mini" style="font-weight:700">📅 Availability by date</div><p class="muted" style="margin:4px 0 0">Add a room type first, then set how many are available on each date.</p></div>`;
+  const head=`<tr><th style="text-align:left">Date</th>${h.rooms.map(r=>`<th title="${esc(r.type)}">${esc(r.type)}</th>`).join('')}<th></th></tr>`;
+  const rows=nights.map(d=>{
+    const custom=nightCustom(h,d), open=hotelOpenOnNight(h,d);
+    const cells=h.rooms.map(r=>{
+      const eff=effRoomCount(h,r.type,d);
+      return `<td><input type="number" min="0" value="${eff}" style="width:64px;${!open?'opacity:.5':''}"
+        onchange="setDayRoom('${h.id}','${d}','${jsq(r.type)}',this.value)"></td>`; }).join('');
+    return `<tr>
+      <td style="text-align:left;white-space:nowrap"><b>${fmtD(d)}</b>
+        ${custom?'<span class="pill p-confirmed" style="margin-left:4px">custom</span>':'<span class="muted" style="font-size:11px;margin-left:4px">base</span>'}
+        ${!open?'<span class="pill p-rejected" style="margin-left:4px">closed</span>':''}</td>
+      ${cells}
+      <td class="row-actions">
+        <button class="btn gray sm" onclick="toggleNightOpen('${h.id}','${d}')" title="${open?'Mark hotel closed this night':'Mark hotel open this night'}">${open?'Close':'Open'}</button>
+        ${custom?`<button class="btn gray sm" onclick="resetDayRooms('${h.id}','${d}')" title="Reset to base counts">↺ base</button>`:''}
+      </td></tr>`; }).join('');
+  return `<div style="margin-top:16px">
+    <div class="rooms-mini" style="font-weight:700;margin-bottom:2px">📅 Availability by date</div>
+    <p class="rooms-mini muted" style="margin:0 0 6px">Set how many of each room type are open on each night. Leave a night as <b>base</b> to use the room counts above; type a number (including 0) to override it for that night. Nights marked <b>custom</b> are the ones you've filled.</p>
+    <table><thead>${head}</thead><tbody>${rows}</tbody></table>
+  </div>`;
+}
+function setDayRoom(id,date,type,val){ const h=DB.hotels.find(x=>x.id===id); if(!h)return;
+  const n=Math.max(0,parseInt(val)||0);
+  if(!h.dayRooms) h.dayRooms={}; if(!h.dayRooms[date]) h.dayRooms[date]={};
+  const old=(h.dayRooms[date][type]!=null)?h.dayRooms[date][type]:((h.rooms.find(r=>r.type===type)||{}).count);
+  h.dayRooms[date][type]=n;
+  const cleared=recalcPending();
+  if(n!==old) roomLog('set availability in', h.name, `${type} on ${fmtD(date)}: ${old} → ${n} rooms`);
+  save(); render(); toast(`${type} on ${fmtD(date)} set to ${n}`+(cleared?` — ${cleared} allocation(s) recalculated`:'')); }
+function resetDayRooms(id,date){ const h=DB.hotels.find(x=>x.id===id); if(!h||!h.dayRooms)return;
+  delete h.dayRooms[date]; if(!Object.keys(h.dayRooms).length) delete h.dayRooms;
+  roomLog('reset availability in', h.name, `${fmtD(date)} back to base counts`);
+  recalcPending(); save(); render(); toast(`${fmtD(date)} reset to base counts`); }
+function toggleNightOpen(id,date){ const h=DB.hotels.find(x=>x.id===id); if(!h)return;
+  const nights=festivalNights(); const wasOpen=hotelOpenOnNight(h,date);
+  // Materialise availNights from the full festival window the first time we close a night.
+  if(!h.availNights || !h.availNights.length) h.availNights=nights.slice();
+  if(wasOpen){ h.availNights=h.availNights.filter(x=>x!==date); }
+  else if(h.availNights.indexOf(date)<0){ h.availNights=nights.filter(x=>h.availNights.indexOf(x)>=0 || x===date); }
+  // If every festival night is open again, drop availNights so it means "open every night".
+  if(nights.every(x=>h.availNights.indexOf(x)>=0)) delete h.availNights;
+  roomLog(wasOpen?'closed a night at':'opened a night at', h.name, fmtD(date));
+  recalcPending(); save(); render(); toast(`${esc(h.name)} ${wasOpen?'closed':'open'} on ${fmtD(date)}`); }
+function addContact(id){ const h=DB.hotels.find(x=>x.id===id); if(!h.contacts)h.contacts=[];
+  const n=$('#cn-'+id).value.trim(), p=$('#cp-'+id).value.trim();
+  if(!n||!p){ toast('Enter both name and phone'); return; }
+  h.contacts.push({name:n,phone:p,send:h.contacts.filter(c=>c.send).length<2}); save(); render(); }
+function delContact(id,i){ const h=DB.hotels.find(x=>x.id===id); h.contacts.splice(i,1); save(); render(); }
+function toggleContactSend(id,i){ const h=DB.hotels.find(x=>x.id===id); const c=h.contacts[i];
+  if(!c.send && h.contacts.filter(x=>x.send).length>=2){ toast('You can select a maximum of 2 contacts'); render(); return; }
+  c.send=!c.send; save(); render(); }
+
+/* ---------------- Admin: Vacancy & Unassigned ---------------- */
+function viewVacancy(){
+  const vacCards=hotelsByPriority().filter(h=>h.active).map(h=>{
+    const rows=h.rooms.map(r=>{ const used=peakRoomsUsed(h.id,r.type), vac=Math.max(0,r.count-used);
+      return `<tr><td>${esc(r.type)}</td><td>${r.count}</td><td>${used}</td>
+        <td><b style="color:${vac>0?'var(--green)':'var(--red)'}">${vac}</b></td>
+        <td>${vac*r.cap} beds</td></tr>`; }).join('');
+    const totVac=h.rooms.reduce((s,r)=>s+Math.max(0,r.count-peakRoomsUsed(h.id,r.type)),0);
+    return `<div class="card"><h2 class="section" style="margin:0 0 6px">🛏️ ${esc(h.name)}
+        <span class="pill ${totVac>0?'p-confirmed':'p-rejected'}">${totVac} rooms free</span></h2>
+      <table><thead><tr><th>Room type</th><th>Total</th><th>Used</th><th>Vacant</th><th>Free beds</th></tr></thead>
+        <tbody>${rows||'<tr><td colspan="5" class="muted">No rooms</td></tr>'}</tbody></table></div>`;
+  }).join('');
+  const un=unassignedBookings();
+  const unRows=un.map(b=>`<tr>
+    <td><b>${headLabel(b)}</b><div class="muted">${peopleLabel(b)} · by ${esc(devoteeName(b))}</div></td>
+    <td>${donDisplay(b)}</td><td>${statusPill(b.status)}</td>
+    <td>${b.preferred&&b.preferred.length?esc(b.preferred.map(hotelName).join(', ')):'—'}</td>
+    <td><button class="btn sm" onclick="go('requests')">Assign →</button></td></tr>`).join('');
+  const unCard=`<div class="card"><h2 class="section">🕗 Unassigned People
+      <span class="pill p-pending">${un.length} pending</span></h2>
+    <p class="subhead">Guests not yet given a confirmed hotel. Total people waiting: ${un.reduce((s,b)=>s+b.count,0)}.</p>
+    <table><thead><tr><th>Guest</th><th>Donation</th><th>Status</th><th>Preferred</th><th></th></tr></thead>
+      <tbody>${unRows||'<tr><td colspan="5" class="muted">Everyone is assigned 🎉</td></tr>'}</tbody></table></div>`;
+  return unCard+`<h2 class="section" style="margin:6px 2px">Vacant rooms by hotel</h2>`+vacCards;
+}
+
+/* ---------------- Admin: Excel Export ---------------- */
+function bookingRow(b){ return {
+  'Head of Family':b.head||'', 'Guest Mobile':b.phone||'', 'Accompanying':b.accompanying!==undefined?b.accompanying:'',
+  'Total People':b.count, 'Devotee':devoteeName(b), 'Donation (₹)':b.donation||0,
+  'Guest Type':b.guestType||'FR', 'Receipt No':b.receipt||'', 'Receipt Verified':b.receiptWrong?'Wrong':(b.donationVerified?'Yes':'No'), 'Seva Received By':b.sevaChannel?sevaChannelLabel(b).replace(/<[^>]+>/g,''):'', 'Seva Date':b.sevaDate||'', 'Accommodation':b.donation>=DB.rules.freeMin?'Free':(b.sevaCollected?'Seva collected':'Seva pending'), 'Status':b.status, 'Hotel':b.hotel?hotelName(b.hotel):'',
+  'Room Type':b.roomType||'', 'Rooms':b.rooms||0,
+  'Extra Bed Requested':b.extraRequested||0, 'Extra Bed Given':b.extraBeds||0,
+  'Separate Rooms Requested':b.roomsRequested||0,
+  'Check-in':b.checkin||'', 'Check-out':b.checkout||'',
+  'Room Dates':(b.stays&&b.stays.length>1)?b.stays.map((s,i)=>`R${i+1} ${s.checkin}→${s.checkout}`).join(' ; '):'',
+  'Hotel Contact':b.hotel?hotelSendContacts(b.hotel).map(c=>c.name+' '+c.phone).join(' ; '):'',
+  'Preferred':(b.preferred||[]).map(hotelName).join(', '), 'Note':b.note||'' }; }
+function dl(wb,name){ XLSX.writeFile(wb,name); toast('Downloaded '+name); }
+function exportFull(){ const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(DB.bookings.map(bookingRow)),'All Bookings');
+  dl(wb,'HKM_all_bookings.xlsx'); }
+function exportByHotel(){ const wb=XLSX.utils.book_new(); let any=false;
+  hotelsByPriority().forEach(h=>{ const rows=DB.bookings.filter(b=>b.hotel===h.id).map(bookingRow);
+    if(rows.length){ any=true; XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(rows),h.name.slice(0,28)); }});
+  const unrows=DB.bookings.filter(b=>!b.hotel).map(bookingRow);
+  if(unrows.length){ any=true; XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(unrows),'Unassigned'); }
+  if(!any){ toast('No bookings to export'); return; } dl(wb,'HKM_by_hotel.xlsx'); }
+function exportByBrahmachari(){ const wb=XLSX.utils.book_new();
+  const names=[...new Set(DB.bookings.map(b=>b.brahmachari))];
+  names.forEach(n=>{ const rows=DB.bookings.filter(b=>b.brahmachari===n).map(bookingRow);
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(rows),(n||'Unknown').slice(0,28)); });
+  if(!names.length){ toast('No bookings'); return; } dl(wb,'HKM_by_brahmachari.xlsx'); }
+function exportByAmount(){ const wb=XLSX.utils.book_new();
+  const buckets=[['Below 25k',0,25000],['25k to 1L',25000,100000],['1L to 2.5L',100000,250000],['2.5L and above',250000,Infinity]];
+  buckets.forEach(([label,lo,hi])=>{ const rows=DB.bookings.filter(b=>(b.donation||0)>=lo&&(b.donation||0)<hi).map(bookingRow);
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(rows.length?rows:[{Note:'No bookings in this range'}]),label); });
+  dl(wb,'HKM_by_amount_range.xlsx'); }
+function exportKindDonors(){ if(typeof XLSX==='undefined'){ toast('Excel library still loading — try again'); return; }
+  const rows=DB.bookings.filter(b=>b.sevaPlan==='kind').map(b=>({
+    'Devotee':devoteeName(b), 'Head of Family':b.head||'', 'Guest Mobile':b.phone||'',
+    'Total People':b.count, 'Donation (₹)':b.donation||0, 'Amount Given':((b.donation||0)>0?'Yes':'No'),
+    'Guest Type':b.guestType||'FR', 'Status':b.status,
+    'Hotel':b.hotel?hotelName(b.hotel):'', 'Room Type':b.roomType||'', 'Rooms':b.rooms||0,
+    'Separate Rooms Requested':b.roomsRequested||0,
+    'Check-in':b.checkin||'', 'Check-out':b.checkout||'', 'Note':b.note||'' }));
+  if(!rows.length){ toast('No kind donors yet'); return; }
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Kind Donors');
+  dl(wb,'HKM_kind_donors.xlsx'); }
+function viewExports(){
+  return `<div class="card"><h2 class="section">📥 Download Lists as Excel</h2>
+    <p class="subhead">Each download opens directly in Microsoft Excel / Google Sheets.</p>
+    <div class="grid g2">
+      <div class="stat"><b>Full list</b><p class="muted" style="margin:6px 0 10px">Every booking in one sheet.</p>
+        <button class="btn" onclick="exportFull()">Download full list</button></div>
+      <div class="stat"><b>Hotel-wise</b><p class="muted" style="margin:6px 0 10px">One sheet per hotel + unassigned.</p>
+        <button class="btn" onclick="exportByHotel()">Download by hotel</button></div>
+      <div class="stat"><b>Devotee-wise</b><p class="muted" style="margin:6px 0 10px">One sheet per Devotee.</p>
+        <button class="btn" onclick="exportByBrahmachari()">Download by Devotee</button></div>
+      <div class="stat"><b>Donation amount range</b><p class="muted" style="margin:6px 0 10px">Grouped: &lt;25k, 25k–1L, 1L–2.5L, 2.5L+.</p>
+        <button class="btn" onclick="exportByAmount()">Download by amount</button></div>
+      <div class="stat"><b>🤝 Kind Donors</b><p class="muted" style="margin:6px 0 10px">All devotees marked as Kind Donor.</p>
+        <button class="btn" onclick="exportKindDonors()">Download Kind Donors</button></div>
+    </div></div>`;
+}
+
+/* ---------------- Admin: Notifications ---------------- */
+let notifFilter='unread';
+function notifIcon(k){ return {new:'🆕',edit:'✏️',cancel:'🚫',withdraw:'↩️',reopen:'🔄',log:'🛠️',seva:'💰'}[k]||'🔔'; }
+function fmtDT(ts){ return new Date(ts).toLocaleString('en-IN',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}); }
+function setNotifFilter(f){ notifFilter=f; render(); }
+function ackNotif(id){ const n=DB.notifications.find(x=>x.id===id); if(n){ n.ack=true; save(); render(); toast('Acknowledged'); } }
+function ackAllNotif(){ let c=0; DB.notifications.forEach(n=>{ if(!n.ack){n.ack=true;c++;} }); save(); render(); toast(c?c+' acknowledged':'Nothing to acknowledge'); }
+let highlightId=null;
+function openBooking(id){ const b=DB.bookings.find(x=>x.id===id);
+  if(!b){ toast('That request no longer exists'); return; }
+  if(b.status==='cancelled'||b.status==='withdrawn'){ toast('Already released — nothing to change'); }
+  highlightId=id; go(b.status==='confirmed'?'booked':'requests');
+  setTimeout(()=>{ const el=document.getElementById('row-'+id);
+    if(el){ el.scrollIntoView({behavior:'smooth',block:'center'}); el.classList.add('row-hi'); setTimeout(()=>el.classList.remove('row-hi'),2200);} },120); }
+function canImplement(n){ if(!n.bookingId) return false; const b=DB.bookings.find(x=>x.id===n.bookingId);
+  return !!b && ['new','edit','reopen'].includes(n.kind) && b.status!=='cancelled' && b.status!=='withdrawn'; }
+function viewNotifications(){
+  const all=DB.notifications||[];
+  const unread=all.filter(n=>!n.ack).length;
+  const list = notifFilter==='unread'?all.filter(n=>!n.ack) : notifFilter==='ack'?all.filter(n=>n.ack) : all;
+  const cards=list.map(n=>`<div class="notif ${n.ack?'ack':'unread'}">
+      <div style="flex:1"><b>${notifIcon(n.kind)} ${esc(n.msg)}</b>
+        <div class="muted">by ${esc(n.brahmachari||'—')} · ${fmtDT(n.ts)}</div></div>
+      <div class="row-actions">
+        ${canImplement(n)?`<button class="btn sm" onclick="openBooking('${n.bookingId}')">Open request →</button>`:''}
+        ${n.ack?'<span class="pill p-confirmed">✓ acknowledged</span>'
+               :`<button class="btn green sm" onclick="ackNotif('${n.id}')">Acknowledge</button>`}
+      </div>
+    </div>`).join('');
+  const fbtn=(f,l)=>`<div class="tab ${notifFilter===f?'active':''}" onclick="setNotifFilter('${f}')">${l}</div>`;
+  return `<div class="card"><h2 class="section">🔔 Notifications <span class="pill p-pending">${unread} unread</span></h2>
+    <p class="subhead">Every new request or change from a Devotee appears here. Acknowledge items so they don't show as unread next time.</p>
+    <div class="flex" style="justify-content:space-between;margin-bottom:12px;gap:10px">
+      <div class="tabs" style="margin:0">${fbtn('unread','Unread')}${fbtn('ack','Acknowledged')}${fbtn('all','All')}</div>
+      <button class="btn sm" onclick="ackAllNotif()">✓ Acknowledge all</button>
+    </div>
+    ${cards||'<p class="muted">Nothing here 🎉</p>'}</div>`;
+}
+
+/* ---------------- Admin: Donations ---------------- */
+function verifyDonation(id){ const b=DB.bookings.find(x=>x.id===id); if(!b)return;
+  if(isVcm() && DB.rules.vcmVerifyLocked){ toast('Receipt verification is locked by the Super Admin'); return; }
+  b.donationVerified=!b.donationVerified; if(b.donationVerified) b.receiptWrong=false; save(); render();
+  toast(b.donationVerified?'Donation receipt verified ✓':'Marked as unverified'); }
+function markReceiptWrong(id){ const b=DB.bookings.find(x=>x.id===id); if(!b)return;
+  if(isVcm() && DB.rules.vcmVerifyLocked){ toast('Receipt verification is locked by the Super Admin'); return; }
+  b.receiptWrong=true; b.donationVerified=false; notify('edit',`Receipt marked WRONG for ${b.head} — asked to correct`, b.brahmachari, b.id); save(); render();
+  toast('Marked as wrong — the devotee is asked to give the correct receipt number'); }
+function clearReceiptWrong(id){ const b=DB.bookings.find(x=>x.id===id); if(!b)return; b.receiptWrong=false; save(); render(); }
+function toggleVcmVerify(){ if(!isSuper()) return; DB.rules.vcmVerifyLocked=!DB.rules.vcmVerifyLocked; save(); render();
+  toast(DB.rules.vcmVerifyLocked?'🔒 VCM receipt verification locked':'🔓 VCM receipt verification unlocked'); }
+/* ---------------- Receipt Verification panel (Super Admin + VCM) ---------------- */
+let receiptFilter='unverified';
+let searchQ={};   // remembers each table's search text so it survives re-renders (edits, verifies, etc.)
+function filterRows(bodyId,q){ q=(q||'').toLowerCase().trim();
+  document.querySelectorAll('#'+bodyId+' tr').forEach(tr=>{ const s=tr.dataset.search||tr.dataset.s||tr.dataset.name||''; tr.style.display=s.includes(q)?'':'none'; }); }
+function setSearch(bodyId,q){ searchQ[bodyId]=q; filterRows(bodyId,q); }
+function reapplySearches(){ for(const id in searchQ){ if(document.getElementById(id)) filterRows(id,searchQ[id]); } }
+function setReceiptFilter(f){ receiptFilter=f; render(); }
+function fallbackCopy(txt){ try{ const ta=document.createElement('textarea'); ta.value=txt; ta.style.position='fixed'; ta.style.opacity='0'; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); toast('Receipt number copied.'); }catch(e){ toast('Could not copy — please copy manually'); } }
+function copyReceipt(id){ const b=DB.bookings.find(x=>x.id===id); if(!b||!b.receipt) return;
+  if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(b.receipt).then(()=>toast('Receipt number copied.'), ()=>fallbackCopy(b.receipt)); }
+  else fallbackCopy(b.receipt); }
+function viewReceipts(){
+  const withReceipt=DB.bookings.filter(b=>b.receipt);
+  const unverified=withReceipt.filter(b=>!b.donationVerified);
+  const list = receiptFilter==='verified' ? withReceipt.filter(b=>b.donationVerified)
+             : receiptFilter==='all' ? withReceipt : unverified;
+  const locked = !!DB.rules.vcmVerifyLocked;
+  const canVerify = isSuper() || !locked;   // VCM can verify only if the Super Admin has not locked it
+  const rows=list.map(b=>`<tr data-search="${esc(((b.head||'')+' '+(b.brahmachari||'')+' '+(b.receipt||'')+' '+(b.phone||'')).toLowerCase())}">
+      <td><b>${headLabel(b)}</b></td>
+      <td>${esc(devoteeName(b))}</td>
+      <td>${seeMoney()?money(b.donation):catBadge(b)}</td>
+      <td><span class="rcp-copy" onclick="copyReceipt('${b.id}')" title="Click to copy — or select the text">${esc(b.receipt)}</span></td>
+      <td>${b.receiptWrong?'<span class="pill p-rejected">✗ Wrong</span>':(b.donationVerified?'<span class="pill p-confirmed">Verified</span>':'<span class="pill p-pending">Unverified</span>')}</td>
+      <td>${!canVerify
+          ? `<button class="btn gray sm" disabled style="opacity:.45;cursor:not-allowed" title="Locked by Super Admin">✓ Verify</button>`
+          : `<div class="row-actions">${b.donationVerified
+              ? `<button class="btn gray sm" onclick="verifyDonation('${b.id}')">Mark unverified</button>`
+              : `<button class="btn green sm" onclick="verifyDonation('${b.id}')">✓ Verify</button>`}
+             ${b.receiptWrong
+              ? `<button class="btn gray sm" onclick="clearReceiptWrong('${b.id}')">Clear</button>`
+              : `<button class="btn red sm" onclick="markReceiptWrong('${b.id}')">✗ Wrong</button>`}</div>`}</td>
+    </tr>`).join('');
+  const fbtn=(f,l)=>`<div class="tab ${receiptFilter===f?'active':''}" onclick="setReceiptFilter('${f}')">${l}</div>`;
+  const lockBtn = isSuper()
+    ? `<button class="btn ${locked?'red':'gray'} sm" onclick="toggleVcmVerify()">${locked?'🔒 VCM verify LOCKED — click to unlock':'🔓 Lock VCM verify access'}</button>`
+    : (locked?'<span class="pill p-rejected">🔒 Verification locked by Super Admin</span>':'');
+  return `<div class="card"><h2 class="section">🧾 Receipt Verification <span class="pill p-pending">${unverified.length} unverified</span></h2>
+    <p class="subhead">Check each donation receipt, click the receipt number to copy it (or select the text), then mark it Verified. A booking can only be confirmed after its receipt is verified.</p>
+    <div class="flex" style="justify-content:space-between;margin-bottom:12px;gap:10px">
+      <div class="tabs" style="margin:0">${fbtn('unverified','Unverified')}${fbtn('verified','Verified')}${fbtn('all','All')}</div>
+      ${lockBtn}
+    </div>
+    <input placeholder="🔍 Search by guest name, number or receipt no." value="${esc(searchQ['rcpRows']||'')}" oninput="setSearch('rcpRows',this.value)" style="margin-bottom:12px">
+    <div class="scrollx"><table><thead><tr><th>Guest / Donor</th><th>Devotee</th><th>Donation</th><th>Receipt number</th><th>Status</th><th>Verify</th></tr></thead>
+      <tbody id="rcpRows">${rows||'<tr><td colspan="6" class="muted">Nothing here 🎉</td></tr>'}</tbody></table></div></div>`;
+}
+/* ---------------- Accommodation report (Super Admin + VCM) — no donation amounts ---------------- */
+let reportHotel='all', reportSort='none';
+function setReportHotel(v){ reportHotel=v; render(); }
+function toggleReportSort(){ reportSort=(reportSort==='days')?'none':'days'; render(); }
+function nights(b){ if(!b.checkin||!b.checkout) return 0; const d1=new Date(b.checkin+'T00:00'),d2=new Date(b.checkout+'T00:00'); return Math.max(0,Math.round((d2-d1)/86400000)); }
+function reportBookings(){ let l=DB.bookings.filter(b=>b.status==='confirmed'); if(reportHotel!=='all') l=l.filter(b=>b.hotel===reportHotel);
+  if(reportSort==='days') l=[...l].sort((a,b)=>nights(b)-nights(a)); return l; }
+/* full hotel text for a booking — lists BOTH guest houses with dates if the stay is split/extended */
+function hotelsTextForBooking(b){ const s=staySplit(b); if(s) return s.map(x=>`${x.name} (${x.from} to ${x.to})`).join(' + '); return hotelName(b.hotel); }
+function accommodationRow(b){ return {
+  'Guest / Family':b.head||'', 'Type':b.guestType||'FR', 'People':b.count, 'Mobile':b.phone||'', 'Devotee':devoteeName(b),
+  'Guest House(s)':hotelsTextForBooking(b), 'Rooms':allocSummary(b),
+  'Check-in':b.checkin||'', 'Check-out':b.checkout||'', 'Nights':nights(b),
+  'Seva':(b.guestType&&b.guestType!=='FR')?'—':(b.donation>=DB.rules.freeMin?'Free stay':(b.sevaCollected?('Received by '+sevaChannelLabel(b).replace(/<[^>]+>/g,'')):'Pending')),
+  'Note':b.note||'' }; }
+function exportAccommodation(){ if(typeof XLSX==='undefined'){ toast('Report library still loading — try again'); return; }
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(reportBookings().map(accommodationRow)), 'Accommodation');
+  XLSX.writeFile(wb, 'HKM_accommodation_report.xlsx'); toast('Accommodation report downloaded'); }
+function viewReport(){
+  const hotelOpts=hotelsByPriority().filter(h=>h.active).map(h=>`<option value="${h.id}" ${reportHotel===h.id?'selected':''}>${esc(h.name)}</option>`).join('');
+  const list=reportBookings();
+  const rows=list.map(b=>`<tr data-search="${esc(((b.head||'')+' '+(b.phone||'')+' '+(b.brahmachari||'')).toLowerCase())}">
+      <td><b>${esc(b.head||'')}</b>${(b.guestType&&b.guestType!=='FR')?' <span class="pill p-waitlist">'+esc(b.guestType)+'</span>':''}<div class="muted">${peopleLabel(b)}${b.phone?' · 📱 '+esc(b.phone):''} · by ${esc(devoteeName(b))}</div></td>
+      <td>${allocHotelText(b)}</td>
+      <td>${allocSummary(b)}</td>
+      <td>${fmtD(b.checkin)}</td>
+      <td>${fmtD(b.checkout)}</td>
+      <td><b>${nights(b)}</b> night${nights(b)===1?'':'s'}</td></tr>`).join('');
+  return `<div class="card"><h2 class="section">📥 Accommodation Report <span class="pill p-confirmed">${list.length}</span></h2>
+    <p class="subhead">Who has been accommodated in which guest house and room, and how many nights they stay. Split/extended stays show both guest houses with dates. Download as Excel (no donation amounts).</p>
+    <div class="flex" style="margin-bottom:12px;gap:10px">
+      <input placeholder="🔍 Search by name or number" value="${esc(searchQ['reportRows']||'')}" oninput="setSearch('reportRows',this.value)" style="flex:1">
+      <select onchange="setReportHotel(this.value)" style="max-width:200px"><option value="all" ${reportHotel==='all'?'selected':''}>All guest houses</option>${hotelOpts}</select>
+      <button class="btn ${reportSort==='days'?'':'gray'} sm" onclick="toggleReportSort()">↕ ${reportSort==='days'?'Longest stay first ✓':'Sort by longest stay'}</button>
+      <button class="btn" onclick="exportAccommodation()">📥 Export Excel</button>
+    </div>
+    <div class="scrollx"><table><thead><tr><th>Guest</th><th>Guest house(s)</th><th>Room</th><th>Check-in</th><th>Check-out</th><th>Nights</th></tr></thead>
+      <tbody id="reportRows">${rows||'<tr><td colspan="6" class="muted">No confirmed accommodations yet</td></tr>'}</tbody></table></div></div>`;
+}
+/* ---------------- Payments / Seva collected panel ---------------- */
+function sevaChannelLabel(b){ const v=b.sevaChannel; return (v==='GPP'||v==='GuestHouse'||v==='Staff')?"GPP's Team (Staff)":v==='Devotee'?('Devotee — '+esc(devoteeName(b))):'—'; }
+/* Bookings that still need an accommodation seva collected (FR, below the free threshold, not settled) */
+function isLowAmount(b){ return (b.guestType||'FR')==='FR' && !isFreeStay(b) && b.status!=='cancelled' && b.status!=='withdrawn'; }
+function staffCollects(b){ return b.sevaPlan==='staff'; }                                       // otherwise the devotee collects
+function needsStaffSeva(b){ return isLowAmount(b) && staffCollects(b) && !b.sevaCollected; }      // GPP's Team still to collect — unpaid or on hold
+function sevaPlanLabel(b){ return b.sevaPlan==='foc' ? '🙏 FOC (free of cost)' : (staffCollects(b) ? "🧑‍🔧 GPP's Team will collect" : '🙋 Devotee will collect'); }
+function sevaStatus(b){ if(!staffCollects(b)) return '<span class="pill p-waitlist">🙋 Will be collected by devotee</span>';
+  if(b.sevaCollected) return '<span class="pill p-confirmed">✅ Paid — collected by '+esc(sevaChannelLabel(b))+'</span>';
+  return '<span class="pill p-pending">💰 Payment due</span>'; }
+/* Record seva payment — works for Staff, VCM and Super Admin (targeted cloud write) */
+async function saveSevaNote(id,text){ const b=DB.bookings.find(x=>x.id===id); if(!b)return; b.sevaNote=(text||'').trim();
+  try{ const {error}=await sb.from('bookings').update({data:bookingData(b),dev_id:b.devId||null}).eq('id',b.id);
+    if(error){ console.warn('note save',error); toast('⚠ Could not save note — check connection'); } else toast('Status note saved'); }catch(e){ console.warn(e); } }
+async function markSeva(id,mode){ const b=DB.bookings.find(x=>x.id===id); if(!b)return;
+  if(mode==='paid'){ b.sevaCollected=true; b.sevaOnHold=false; b.sevaDate=new Date().toISOString().slice(0,10); b.sevaChannel='GPP'; }   // room payment is always collected by Staff = GPP's Team (VCM does not collect)
+  else if(mode==='hold'){ b.sevaOnHold=true; b.sevaCollected=false; }
+  else if(mode==='unpaid'){ b.sevaCollected=false; b.sevaOnHold=false; }
+  render();
+  try{ const {error}=await sb.from('bookings').update({data:bookingData(b),dev_id:b.devId||null}).eq('id',b.id);
+    if(error){ console.warn('seva save',error); toast('⚠ Could not save — check connection'); } else toast(mode==='paid'?'Marked paid ✓':mode==='hold'?'Put on hold':'Marked unpaid'); }catch(e){ console.warn(e); }
+}
+function viewCollections(){
+  const paid=DB.bookings.filter(b=>b.sevaCollected);
+  const rows=paid.map(b=>`<tr>
+      <td><b>${headLabel(b)}</b>${(b.guestType&&b.guestType!=='FR')?' <span class="pill p-waitlist">'+esc(b.guestType)+'</span>':''}</td>
+      <td>${esc(devoteeName(b))}</td>
+      <td>${b.hotel?esc(hotelName(b.hotel)):'<span class="muted">—</span>'}</td>
+      <td>${b.roomType?allocSummary(b):'<span class="muted">—</span>'}</td>
+      <td><span class="pill p-confirmed">Seva received</span></td>
+      <td>${sevaChannelLabel(b)}</td>
+      <td>${b.sevaDate?fmtD(b.sevaDate):'—'}</td>
+      <td>${b.receipt?esc(b.receipt):'<span class="muted">—</span>'}</td>
+    </tr>`).join('');
+  return `<div class="card"><h2 class="section">💰 Room Payments / Seva Collected <span class="pill p-confirmed">${paid.length}</span></h2>
+    <p class="subhead">Every guest whose room seva has been collected — by GPP's Team (Staff) or paid by the Devotee.</p>
+    <div class="scrollx"><table><thead><tr><th>Guest / Family</th><th>Devotee</th><th>Guest house</th><th>Room</th><th>Payment</th><th>Received by</th><th>Date</th><th>Receipt no.</th></tr></thead>
+      <tbody>${rows||'<tr><td colspan="8" class="muted">No seva collected yet</td></tr>'}</tbody></table></div></div>`;
+}
+/* ---------------- Seva to collect (Staff, VCM, Super Admin) ---------------- */
+function viewSevaCollect(){
+  const staff = USER.role==='staff';
+  const amt=b=>seeMoney()?money(b.donation):catBadge(b);
+  const acts=b=>{
+    if(!staffCollects(b)) return `<span class="muted">No action — devotee collects</span>`;
+    if(b.sevaCollected) return `<button class="btn gray sm" onclick="markSeva('${b.id}','unpaid')">Mark unpaid</button>`;
+    return `<button class="btn green sm" onclick="markSeva('${b.id}','paid')">✅ Paid</button>`;
+  };
+  // Staff sees ONLY the ones they (GPP's Team) must collect; devotee-collect ones are hidden (nothing for staff to do).
+  // VCM & Super Admin see EVERY low-donation FR booking, with who booked it and who collects/collected.
+  const list = staff ? DB.bookings.filter(b=>isLowAmount(b)&&staffCollects(b)) : DB.bookings.filter(isLowAmount);
+  const cols = staff ? ['Guest / Family','Booked by','Donation','Who collects','Status','Dates','Action']
+                     : ['Guest / Family','Booked by (Devotee)','Donation','Who collects','Payment / collected by','Dates','Action'];
+  const row=b=>`<tr data-search="${esc(((b.head||'')+' '+(b.phone||'')+' '+(b.brahmachari||'')).toLowerCase())}">
+    <td data-label="Guest"><b>${esc(headLabel(b))}</b><div class="muted">${esc(peopleLabel(b))}</div>${b.phone?`<div style="margin-top:2px"><a href="tel:${esc(b.phone)}" style="color:var(--saffron-dark);font-weight:600;text-decoration:none">📞 ${esc(b.phone)}</a></div>`:'<div class="muted">📞 no number</div>'}</td>
+    <td data-label="Booked by">${esc(devoteeName(b)||'—')}</td>
+    <td data-label="Donation">${amt(b)}</td>
+    <td data-label="Who collects">${sevaPlanLabel(b)}</td>
+    <td data-label="${staff?'Status':'Payment / collected by'}">${sevaStatus(b)}</td>
+    <td data-label="Dates">${esc(stayLabel(b)||'—')}</td>
+    <td data-label="Action"><div class="row-actions">${acts(b)}</div>
+      <div style="margin-top:6px"><input type="text" value="${esc(b.sevaNote||'')}" placeholder="✍ status note (e.g. not answering, will pay 5 Sept)" style="width:100%;min-width:170px;font-size:12px" onchange="saveSevaNote('${b.id}',this.value)"></div></td></tr>`;
+  const pendingCount = DB.bookings.filter(needsStaffSeva).length;
+  return `<div class="card"><h2 class="section">💰 Seva to collect <span class="pill p-pending">${pendingCount} pending</span></h2>
+    ${staff ? '' : '<p class="subhead">Every low‑donation (below ₹50,000) FR guest booked, showing <b>who booked</b> them and <b>who collects / collected</b> the seva. “Devotee will collect” needs no action — VCM can confirm the room directly.</p>'}
+    <input placeholder="🔍 Search guest, number or devotee" value="${esc(searchQ['sevaRows']||'')}" oninput="setSearch('sevaRows',this.value)" style="margin-bottom:10px;max-width:380px">
+    <div class="scrollx"><table class="stack-mobile"><thead><tr>${cols.map(c=>'<th>'+c+'</th>').join('')}</tr></thead>
+      <tbody id="sevaRows">${list.map(row).join('')||('<tr><td colspan="'+cols.length+'" class="muted">Nothing here 🎉</td></tr>')}</tbody></table></div></div>`;
+}
+/* ---------------- Super Admin: Settings (rules) ---------------- */
+function setRule(f,v){ DB.rules[f]=Math.max(0,parseInt(v)||0); syncHotelMinFromRules(); const c=recalcPending(); save(); render();
+  toast('Rules updated — pending requests recalculated'+(c?` (${c} reset)`:'')); }
+function setEventDate(f,v){ if(!v) return; DB.rules[f]=v; save(); render(); toast('Festival booking window updated'); }
+function toggleCatHotel(cat,hid){ const map=DB.rules.categoryHotels; if(!map[cat])map[cat]=[];
+  const i=map[cat].indexOf(hid); if(i>=0)map[cat].splice(i,1); else map[cat].push(hid);
+  syncHotelMinFromRules(); const c=recalcPending(); save(); render();
+  toast('Category mapping updated — pending recalculated'+(c?` (${c} reset)`:'')); }
+function viewSettings(){
+  const r=DB.rules, inr=n=>'₹'+Number(n||0).toLocaleString('en-IN');
+  const hotelCheck=(cat)=>DB.hotels.map(h=>`<label style="display:flex;gap:7px;align-items:center;margin:4px 0;font-weight:500">
+      <input type="checkbox" style="width:auto" ${(r.categoryHotels[cat]||[]).includes(h.id)?'checked':''} onchange="toggleCatHotel('${cat}','${h.id}')"> ${esc(h.name)}</label>`).join('');
+  return `<div class="card"><h2 class="section">🎪 Festival booking window</h2>
+    <p class="subhead">Devotees can only book stays within these dates. Only the Super Admin can change this.</p>
+    <div class="grid g2">
+      <div><label>Booking from</label><input type="date" value="${r.eventStart}" onchange="setEventDate('eventStart',this.value)"></div>
+      <div><label>Booking to</label><input type="date" value="${r.eventEnd}" onchange="setEventDate('eventEnd',this.value)"></div>
+    </div>
+    <p class="muted" style="margin-top:8px">Current window: ${fmtD(r.eventStart)} – ${fmtD(r.eventEnd)} ${r.eventStart.slice(0,4)}</p>
+    </div>
+    <div class="card"><h2 class="section">⚙️ Settings — Donation categories & suggestion rules</h2>
+    <p class="subhead">Super Admin only. Any change here instantly recalculates all pending requests with the new rules.</p>
+    <div class="grid g3">
+      <div><label>H4 minimum (₹) — ₹2.5–5L band</label><input type="number" min="0" value="${r.d1Min}" onchange="setRule('d1Min',this.value)"></div>
+      <div><label>D2 minimum (₹)</label><input type="number" min="0" value="${r.d2Min}" onchange="setRule('d2Min',this.value)"></div>
+      <div><label>Free-stay minimum (₹)</label><input type="number" min="0" value="${r.freeMin}" onchange="setRule('freeMin',this.value)"></div>
+    </div>
+    <p class="muted" style="margin-top:8px">H1 ≥ ₹25L · H2 ₹11–25L · H3 ₹5–11L · H4 = ${inr(r.d1Min)} to ₹5L &nbsp;·&nbsp; D2 = ${inr(r.d2Min)} to below ${inr(r.d1Min)} &nbsp;·&nbsp; D3 = below ${inr(r.d2Min)} &nbsp;·&nbsp; Free stay ≥ ${inr(r.freeMin)}</p>
+    </div>
+    <div class="grid g3">
+      <div class="card"><h2 class="section" style="margin:0 0 6px">Top tier → guest houses</h2><p class="rooms-mini" style="margin:0 0 6px">Reserved for top donors (H1–H4)</p>${hotelCheck('D1')}</div>
+      <div class="card"><h2 class="section" style="margin:0 0 6px">D2 → guest houses</h2>${hotelCheck('D2')}</div>
+      <div class="card"><h2 class="section" style="margin:0 0 6px">D3 → guest houses</h2>${hotelCheck('D3')}</div>
+    </div>`;
+}
+function viewDonations(){
+  const rows=DB.bookings.map(b=>`<tr>
+    <td><b>${headLabel(b)}</b><div class="muted">by ${esc(devoteeName(b))} · ${peopleLabel(b)}</div></td>
+    <td>${money(b.donation)}</td>
+    <td>${b.receipt?`📎 <b>${esc(b.receipt)}</b>`:'<span class="muted">no receipt no.</span>'}</td>
+    <td>${b.donationVerified
+      ? `<span class="pill p-confirmed">✓ verified</span> <button class="btn gray sm" onclick="verifyDonation('${b.id}')">undo</button>`
+      : `<button class="btn sm" onclick="verifyDonation('${b.id}')">Verify receipt</button>`}</td>
+    <td>${statusPill(b.status)}</td>
+  </tr>`).join('');
+  const tot=DB.bookings.reduce((s,b)=>s+(b.donation||0),0);
+  const verifiedCount=DB.bookings.filter(b=>b.donationVerified).length;
+  return `<div class="card"><h2 class="section">🧾 Donations</h2>
+    <p class="subhead">Check each receipt number and press <b>Verify receipt</b> to confirm it. Receipts should be verified before allocation.</p>
+    <div class="grid g2" style="max-width:520px;margin-bottom:14px">
+      <div class="stat"><div class="n">${money(tot)}</div><div class="l">Total pledged</div></div>
+      <div class="stat"><div class="n">${verifiedCount} / ${DB.bookings.length}</div><div class="l">Receipts verified</div></div>
+    </div>
+    <table><thead><tr><th>Donor / Devotee</th><th>Amount</th><th>Receipt number</th><th>Verify</th><th>Booking</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>`;
+}
+
+/* ---------------- Super Admin: Logins (all IDs & passwords) ---------------- */
+function copyStr(s,msg){ if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(s).then(()=>toast((msg||'Copied')+': '+s),()=>fallbackCopy(s)); } else fallbackCopy(s); }
+function setAssign(id,val){ DB.assign=DB.assign||{}; DB.assign[id]=val.trim(); sb.from('profiles').update({assigned_name:val.trim()}).eq('login_id',id).then(()=>{},e=>console.warn('assign',e)); }
+function filterLoginRows(q){ q=(q||'').toLowerCase().trim();
+  document.querySelectorAll('#loginRows tr').forEach(tr=>{ const s=tr.dataset.s||''; tr.style.display=s.includes(q)?'':'none'; }); }
+function loginRoleLabel(r){ return r==='admin'?'Super Admin':r==='vcm'?'Admin (VCM)':r==='staff'?'Staff':'Devotee'; }
+/* Copy the full login (ID + password + person's name) as text so it can be shared on WhatsApp */
+function copyLogin(id){
+  const pw=(DB.creds&&DB.creds[id])||''; const name=(DB.assign&&DB.assign[id])||'';
+  const txt='Sri Vrindavan — Booking Portal\nhttps://srivrindavan.com\n\nLogin ID: '+id+'\nPassword: '+pw+(name?('\nName: '+name):'');
+  if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(txt).then(()=>toast('✅ Login copied — paste it to share'),()=>fallbackCopy(txt)); } else fallbackCopy(txt);
+}
+function viewLogins(){
+  DB.assign=DB.assign||{}; DB.creds=DB.creds||{};
+  const order={admin:0,vcm:1,staff:2,brahmachari:3};
+  const list=[...(DB.loginList||[])].sort((a,b)=> (order[a.role]-order[b.role]) || a.login_id.localeCompare(b.login_id));
+  const rows=list.map(u=>{ const to=DB.assign[u.login_id]||''; const pw=DB.creds[u.login_id]||''; const rl=loginRoleLabel(u.role);
+    return `<tr data-s="${esc((u.login_id+' '+rl+' '+to).toLowerCase())}">
+      <td data-label="Login ID"><span class="rcp-copy" onclick="copyLogin('${u.login_id}')" title="Click to copy this login">${u.login_id}</span></td>
+      <td data-label="Password"><span class="rcp-copy" onclick="copyLogin('${u.login_id}')" title="Click to copy this login">${esc(pw||'••••')}</span></td>
+      <td data-label="Role">${rl}</td>
+      <td data-label="Assigned to"><input type="text" value="${esc(to)}" placeholder="type person's name" style="min-width:150px" onchange="setAssign('${u.login_id}',this.value)"></td>
+      <td data-label="Share"><button class="btn sm" onclick="copyLogin('${u.login_id}')">📋 Copy</button></td>
+    </tr>`; }).join('');
+  const counts=['admin','vcm','staff','brahmachari'].map(r=>loginRoleLabel(r)+': '+list.filter(u=>u.role===r).length).join(' · ');
+  return `<div class="card"><h2 class="section">🔑 Logins</h2>
+    <p class="subhead">All ${list.length} login accounts. Passwords are visible only to you (Super Admin) — no other role can see them. Tap <b>Copy</b> (or a row's ID/password) to copy the <b>Login ID + Password + Name</b> together, ready to paste into WhatsApp. ${counts}.</p>
+    <input placeholder="🔍 Search ID, role, or assigned name" value="${esc(searchQ['loginRows']||'')}" oninput="setSearch('loginRows',this.value)" style="max-width:360px;margin-bottom:10px">
+    <div style="overflow:auto">
+    <table class="stack-mobile"><thead><tr><th>Login ID</th><th>Password</th><th>Role</th><th>Assigned to (person's name)</th><th>Share</th></tr></thead>
+      <tbody id="loginRows">${rows}</tbody></table></div></div>`;
+}
+
+/* init total line after render */
+const _origRender=render;
+render=function(){ _origRender(); if(currentTab==='newreq'){ updateSummary(); renderDateRows(); prefillEdit(); updateTypeUI(); syncSevaPlan(); checkReceipt(); }
+  reapplySearches();
+  if(USER&&(USER.role==='admin'||USER.role==='vcm')) updateNotifBadge(); };
+function updateNotifBadge(){ const n=DB.notifications.filter(x=>!x.ack).length; const el=$('#notifBadge');
+  if(el){ el.textContent=n||''; el.style.display=n?'':'none'; } }
+initLoginPrefill();
+</script>
+</body>
+</html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<title>Sri Vrindavan Accommodation Booking Portal</title>
+<style>
+  :root{
+    --saffron:#e8891f; --saffron-dark:#c96f0d; --gold:#d4a017;
+    --cream:#fff9f0; --ink:#2b2118; --muted:#7a6a58;
+    --line:#ecdcc4; --green:#2e8b57; --red:#c0392b; --amber:#d9832a;
+    --card:#ffffff; --shadow:0 6px 24px rgba(120,80,20,.10);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:'Segoe UI',system-ui,-apple-system,sans-serif;background:
+    radial-gradient(1200px 500px at 50% -100px,#fff2df,transparent),var(--cream);color:var(--ink)}
+  a{color:var(--saffron-dark)}
+  header.topbar{background:linear-gradient(135deg,var(--saffron),var(--saffron-dark));color:#fff;
+    padding:14px 22px;display:flex;align-items:center;gap:14px;box-shadow:var(--shadow);position:sticky;top:0;z-index:20}
+  .logo{width:44px;height:44px;border-radius:50%;background:#fff;color:var(--saffron-dark);
+    display:grid;place-items:center;font-size:24px;font-weight:800}
+  .brand h1{font-size:18px;margin:0;letter-spacing:.3px}
+  .brand p{margin:0;font-size:12px;opacity:.9}
+  .topbar .spacer{flex:1}
+  .who{font-size:13px;text-align:right;line-height:1.3}
+  .btn{border:none;border-radius:9px;padding:9px 16px;font-size:14px;font-weight:600;cursor:pointer;
+    background:var(--saffron);color:#fff;transition:.15s}
+  .btn:hover{background:var(--saffron-dark)}
+  .btn.ghost{background:transparent;color:#fff;border:1px solid rgba(255,255,255,.6)}
+  .btn.sm{padding:5px 11px;font-size:12.5px}
+  .btn.gray{background:#efe6d8;color:var(--ink)} .btn.gray:hover{background:#e3d5c1}
+  .btn.green{background:var(--green)} .btn.red{background:var(--red)}
+  .wrap{max-width:1120px;margin:22px auto;padding:0 18px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  h2.section{font-size:17px;margin:0 0 14px;display:flex;align-items:center;gap:8px}
+  label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:10px 0 4px}
+  input,select,textarea{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:9px;font-size:16px;line-height:1.4;font-family:inherit;background:#fffdf9}
+  input:focus,select:focus,textarea:focus{outline:2px solid #f3c07a;border-color:#f3c07a}
+  .grid{display:grid;gap:14px}
+  .g2{grid-template-columns:1fr 1fr} .g3{grid-template-columns:1fr 1fr 1fr} .g4{grid-template-columns:repeat(4,1fr)}
+  @media(max-width:760px){
+    .g2,.g3,.g4{grid-template-columns:1fr}
+    .wrap{margin:14px auto;padding:0 12px}
+    .card{padding:15px;border-radius:12px}
+    /* tabs scroll sideways instead of stacking into many rows */
+    .tabs{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:4px}
+    .tab{white-space:nowrap;flex:0 0 auto;padding:9px 15px}
+    /* wide tables scroll horizontally */
+    .card > table, .card .scrollx{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch;white-space:nowrap}
+    .btn{padding:11px 16px}
+    .btn.sm{padding:7px 11px}
+    .row-actions{grid-template-columns:1fr;gap:8px;max-width:none}
+    header.topbar{padding:12px 14px}
+    .brand h1{font-size:16px}
+  }
+  table{width:100%;border-collapse:collapse;font-size:13.5px}
+  th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line)}
+  th{background:#fbf3e6;font-size:12px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted)}
+  tr:hover td{background:#fffaf1}
+  .pill{display:inline-block;padding:3px 10px;border-radius:999px;font-size:11.5px;font-weight:700}
+  .p-pending{background:#fdf0dc;color:var(--amber)}
+  .p-confirmed{background:#e3f5ea;color:var(--green)}
+  .p-rejected{background:#fbe4e1;color:var(--red)}
+  .p-waitlist{background:#eae6fb;color:#6c5ce7}
+  .p-cancelled{background:#eeeeee;color:#888}
+  .p-withdrawn{background:#f3e6e6;color:#a55}
+  .p-edited{background:#e6f0fb;color:#3b6fa0}
+  .stat{background:linear-gradient(135deg,#fff,#fff6e9);border:1px solid var(--line);border-radius:14px;padding:16px}
+  .stat .n{font-size:26px;font-weight:800;color:var(--saffron-dark)}
+  .stat .l{font-size:12.5px;color:var(--muted);margin-top:2px}
+  .tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+  .tab{padding:8px 16px;border-radius:999px;background:#f2e7d6;color:var(--ink);cursor:pointer;font-size:13.5px;font-weight:600}
+  .tab.active{background:var(--saffron);color:#fff}
+  .hidden{display:none!important}
+  .muted{color:var(--muted);font-size:13px}
+  .center{min-height:calc(100vh - 74px);display:grid;place-items:center;padding:20px}
+  .login{width:100%;max-width:420px}
+  .rolebtns{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
+  .rolebtn .ic{font-size:22px}
+  .rolebtn{padding:14px;border:2px solid var(--line);border-radius:12px;text-align:center;cursor:pointer;background:#fffdf9}
+  .rolebtn.active{border-color:var(--saffron);background:#fff4e4}
+  .rolebtn .ic{font-size:22px} .rolebtn .t{font-weight:700;font-size:14px;margin-top:4px} .rolebtn .s{font-size:11px;color:var(--muted)}
+  .row-actions{display:grid;grid-template-columns:1fr 1fr;gap:5px;max-width:270px;margin-left:auto}
+  .row-actions .btn{width:100%;text-align:center;padding:6px 8px;font-size:12px;line-height:1.2;min-height:0;align-self:stretch}
+  .bar{height:9px;border-radius:6px;background:#f0e6d6;overflow:hidden}
+  .bar > span{display:block;height:100%;background:linear-gradient(90deg,var(--saffron),var(--gold))}
+  .toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;
+    padding:12px 20px;border-radius:10px;font-size:14px;box-shadow:var(--shadow);opacity:0;transition:.3s;z-index:50}
+  .toast.show{opacity:1}
+  .subhead{font-size:12px;color:var(--muted);margin:-8px 0 14px}
+  .flex{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .rooms-mini{font-size:12px;color:var(--muted)}
+  .alloc{display:flex;flex-direction:column;gap:5px;min-width:225px;max-width:280px}
+  .alloc .a-sel{padding:6px 8px;font-size:13px}
+  .a-row{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+  .a-lbl{font-size:12px;color:var(--muted);font-weight:600}
+  .stepper{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:#fffdf9}
+  .stepper button{border:none;background:#f2e7d6;width:26px;height:28px;font-size:15px;line-height:1;cursor:pointer;color:var(--ink)}
+  .stepper button:hover{background:#e3d5c1}
+  .stepper input{width:38px;border:none;text-align:center;font-weight:700;padding:6px 0;background:transparent;font-size:15px}
+  .stepper input:focus{outline:none}
+  /* larger touch-friendly stepper for the guest form */
+  .stepper.big{width:100%;justify-content:space-between;border-radius:10px}
+  .stepper.big button{width:46px;height:46px;font-size:22px}
+  .stepper.big input{font-size:18px;height:46px}
+  .a-num{width:46px!important;text-align:center;padding:6px 4px!important;font-size:13px}
+  .a-ask{font-size:10.5px;background:#fdf0dc;color:var(--amber);padding:2px 7px;border-radius:999px;font-weight:700}
+  .a-meta{font-size:11.5px;color:var(--muted);line-height:1.45}
+  .notif{display:flex;align-items:center;gap:12px;border-radius:11px;padding:12px 14px;margin-bottom:9px;border:1px solid}
+  .notif.unread{background:#fdecec;border-color:#f2c4c4}
+  .notif.ack{background:#e7f6ec;border-color:#bfe6cd}
+  .tabbadge{background:#c0392b;color:#fff;border-radius:999px;padding:1px 7px;font-size:11px;margin-left:3px;font-weight:700}
+  .rcp-copy{cursor:pointer;user-select:text;-webkit-user-select:text;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;background:#f6efe2;border:1px solid var(--line);border-radius:6px;padding:4px 9px;display:inline-block}
+  .rcp-copy:hover{background:#efe1c8;border-color:#e0cba0}
+  tr.row-hi td{background:#ffe6b0 !important;transition:background .35s}
+  .seva-free{font-size:12px;color:var(--green);background:#e7f6ec;border:1px solid #bfe6cd;border-radius:8px;padding:6px 9px;margin-top:2px}
+  .seva-collect{display:flex;gap:6px;align-items:center;font-size:11.5px;color:var(--amber);background:#fdf0dc;border:1px solid #f0d9b0;border-radius:8px;padding:5px 8px;margin-top:1px}
+  .seva-collect.done{color:var(--green);background:#e7f6ec;border-color:#bfe6cd}
+  fieldset{border:1px dashed var(--line);border-radius:10px;padding:12px;margin-top:10px}
+  legend{font-size:12px;color:var(--muted);padding:0 6px}
+  /* Mobile: stack wide tables into readable cards (no sideways scrolling) */
+  @media (max-width:640px){
+    table.stack-mobile{display:block;width:100%;border:0}
+    table.stack-mobile thead{position:absolute;left:-9999px;height:0;overflow:hidden}
+    table.stack-mobile tbody{display:block;width:100%}
+    table.stack-mobile tr{display:block;border:1px solid var(--line);border-radius:12px;background:#fff;padding:6px 12px;margin-bottom:12px;box-shadow:var(--shadow)}
+    table.stack-mobile td{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;width:auto;border:0;border-bottom:1px dashed var(--line);padding:8px 0;text-align:right}
+    table.stack-mobile tr td:last-child{border-bottom:0}
+    table.stack-mobile td::before{content:attr(data-label);font-weight:700;color:var(--muted);text-align:left;flex:0 0 40%;white-space:nowrap}
+    table.stack-mobile td .muted{text-align:right}
+    table.stack-mobile td .row-actions{display:grid;grid-template-columns:1fr 1fr;gap:6px;max-width:none}
+    table.stack-mobile td .btn.sm{width:100%}
+  }
+</style>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="loginView" class="center">
+  <div class="card login">
+    <div style="text-align:center;margin-bottom:8px">
+      <div class="logo" style="margin:0 auto 8px;width:56px;height:56px;font-size:30px;background:var(--saffron);color:#fff">☸</div>
+      <h1 style="margin:0;font-size:19px;font-weight:800;letter-spacing:.2px">Accommodation Booking Portal</h1>
+      <p style="margin:3px 0 0;font-family:cursive;font-size:22px;color:var(--saffron-dark)">Sri Vrindavan</p>
+    </div>
+    <label>Login ID</label>
+    <input id="loginId" placeholder="e.g. DEV001" autocapitalize="characters" autocomplete="off">
+    <label>Password</label>
+    <input id="loginPass" type="password" placeholder="••••••••" autocomplete="off">
+    <p id="loginHint" style="text-align:center;margin:10px 0 0;font-size:12px;color:var(--saffron-dark)"></p>
+    <button id="loginBtn" class="btn" style="width:100%;margin-top:14px" onclick="doLogin()">Enter Portal</button>
+    <p class="muted" style="text-align:center;margin:12px 0 0;font-size:11.5px">
+      Your bookings are saved securely in the cloud and shared live across all devices.</p>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="appView" class="hidden">
+  <header class="topbar">
+    <div class="logo">☸</div>
+    <div class="brand"><h1 style="font-size:15px;font-weight:800">Accommodation Booking Portal</h1><p style="font-family:cursive;font-size:15px;opacity:1">Sri Vrindavan</p></div>
+    <div class="spacer"></div>
+    <div class="who"><div id="whoName">—</div><div id="whoRole" style="opacity:.85"></div></div>
+    <button class="btn ghost sm" onclick="logout()">Logout</button>
+  </header>
+  <div class="wrap">
+    <div class="tabs" id="tabs"></div>
+    <div id="pageBody"></div>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+<div id="noticeOverlay" onclick="if(event.target===this)closeNotice()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;align-items:center;justify-content:center;padding:18px">
+  <div style="background:#fff;max-width:420px;width:100%;border-radius:16px;padding:22px 20px;box-shadow:0 12px 40px rgba(0,0,0,.25)">
+    <div id="noticeIcon" style="font-size:34px;text-align:center;margin-bottom:6px">ℹ️</div>
+    <div id="noticeTitle" style="font-weight:800;font-size:17px;text-align:center;margin-bottom:8px"></div>
+    <div id="noticeBody" style="font-size:14px;line-height:1.5;color:#444;text-align:center"></div>
+    <button onclick="closeNotice()" style="margin-top:16px;width:100%;padding:11px;border:none;border-radius:10px;background:var(--saffron,#e8820c);color:#fff;font-weight:700;font-size:15px;cursor:pointer">Got it</button>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script>
+/* ---------------- Data layer (Supabase cloud) ---------------- */
+const DB_KEY = 'hkm_portal_v30';
+const SB_URL="https://qhfbfatubtofjapdzvdv.supabase.co";
+const SB_KEY="sb_publishable_tQBD7n-LXWOP3M2cGlyw6Q_gTbM6nV4";
+const sb = window.supabase.createClient(SB_URL, SB_KEY);
+function seed(){
+  const extra=[];
+  const FN=['Amit','Priya','Rahul','Sneha','Vikram','Anjali','Rohan','Kavita','Sanjay','Meera','Arjun','Pooja','Karan','Divya','Suresh','Neha','Manish','Ritu','Deepak','Anita','Gaurav','Shreya','Nikhil','Preeti','Ajay','Swati','Vivek','Lakshmi','Harish','Nisha'];
+  const LN=['Sharma','Verma','Gupta','Iyer','Singh','Nair','Mehta','Joshi','Rao','Desai','Reddy','Malhotra','Kapoor','Menon','Patel'];
+  const nm=(i)=>FN[i%FN.length]+' '+LN[Math.floor(i/FN.length)%LN.length];
+  const pad=n=>('0'+n).slice(-2); const dISO=dd=>'2026-09-'+pad(dd); let _gi=0;
+  const gen=(id,head,gt,don,hotel,rt,verified,seva,ch)=>{ _gi++; const inD=1+(_gi%6), outD=Math.min(10,inD+2+(_gi%4)); const ci=dISO(inD),co=dISO(outD);
+    return {id,brahmachari:'Gopal Das',head,phone:'+91 90000 '+id,guestType:gt,accompanying:1,count:2,family:true,preferred:[],donation:don,receipt:don?('RCP-'+id.toUpperCase()):'',extraRequested:0,extraBeds:0,roomsRequested:1,checkin:ci,checkout:co,stays:[{checkin:ci,checkout:co,extra:false}],donationVerified:verified,sevaCollected:seva,sevaChannel:ch||'',sevaDate:seva?'2026-08-30':'',status:'confirmed',hotel,roomType:rt,rooms:1,note:'',created:Date.now()-3600000}; };
+  for(let i=1;i<=10;i++) extra.push(gen('hd'+i,nm(i),'FR',300000+i*10000,'h3','2-bed',true,false,''));   // >₹3L but placed in Hide Away
+  for(let i=1;i<=15;i++) extra.push(gen('in'+i,nm(50+i),'FR',i*250,'h1','2-bed',true,false,''));         // low-donation guests already inside Braj Nidhi (swap candidates)
+  extra.push(gen('lo1',nm(80),'FR',20000,'h1','2-bed',true,true,'GuestHouse'));
+  extra.push(gen('lo2',nm(81),'FR',35000,'h1','3-bed',true,true,'GPP'));
+  extra.push(gen('lo3',nm(82),'FR',48000,'h1','2-bed',true,true,'Devotee'));
+  extra.push(gen('pr1',nm(90),'PR',0,'h1','2-bed',false,false,''));
+  extra.push(gen('pr2',nm(91),'PR',0,'h3','2-bed',false,false,''));
+  extra.push(gen('md1',nm(92),'Media',0,'h1','2-bed',false,false,''));
+  extra.push(gen('md2',nm(93),'Media',0,'h3','2-bed',false,false,''));
+  extra.push(gen('vl1',nm(94),'Volunteer',0,'h1','2-bed',false,false,''));
+  extra.push(gen('vl2',nm(95),'Volunteer',0,'h3','2-bed',false,false,''));
+  // 50 varied PENDING requests to fill the Requests queue (2/3 people, some extra bed, mixed donations & guest types)
+  const gtCycle=['FR','FR','FR','FR','FR','FR','FR','PR','Media','Volunteer'];
+  const donCycle=[1500,3000,8000,15000,60000,120000,300000];
+  for(let i=1;i<=50;i++){
+    const gt=gtCycle[i%gtCycle.length];
+    const cnt=(i%3===0)?3:2;                 // some need 3-bed, most 2-bed
+    const ex=(i%4===0)?1:0;                  // every 4th asks for an extra bed
+    const isFR=gt==='FR';
+    const don=isFR?donCycle[i%donCycle.length]:0;
+    const inD=1+(i%7), outD=Math.min(10,inD+1+(i%4)); const ci=dISO(inD),co=dISO(outD);
+    extra.push({id:'rq'+i,brahmachari:(i%2?'Gopal Das':'Nitai Das'),head:nm(120+i),phone:'+91 98765 '+(10000+i),
+      guestType:gt,accompanying:cnt-1,count:cnt,family:cnt>1,preferred:[],
+      donation:don,receipt:isFR?('RCP-3'+(1000+i)):'',extraRequested:ex,extraBeds:0,roomsRequested:1,
+      checkin:ci,checkout:co,stays:[{checkin:ci,checkout:co,extra:ex>0}],
+      status:'pending',hotel:'',roomType:'',rooms:0,note:'', created:Date.now()-i*60000});
+  }
+  return {
+    hotels:[
+      {id:'h1',name:'Braj Nidhi (VCM Guest House)',active:true,priority:1,minDonation:250000,extraBedding:true,
+        contacts:[{name:'VCM Front Desk',phone:'+91 90000 11111',send:true}],
+        rooms:[{type:'2-bed',cap:2,count:10},{type:'3-bed',cap:3,count:46},{type:'4-bed',cap:4,count:4}]},
+      {id:'h2',name:'Madhav Kutir',active:true,priority:2,minDonation:250000,extraBedding:true,manualOnly:true,contacts:[],
+        rooms:[{type:'Villa (2-room family)',cap:4,count:4},{type:'Villament (4-bed family)',cap:4,count:12}]},
+      {id:'h3',name:'Hide Away Hotel',active:true,priority:3,minDonation:0,extraBedding:true,contacts:[],
+        availableUntil:'2026-09-05',transferTo:'h1',
+        rooms:[{type:'2-bed',cap:2,count:30}]},
+      {id:'h4',name:'Ved Vihari',active:true,priority:4,minDonation:0,extraBedding:true,contacts:[],
+        rooms:[{type:'2-bed',cap:2,count:5}]},
+    ],
+    bookings:[
+      {id:'b1',brahmachari:'Gopal Das',head:'Ramesh Sharma',phone:'+91 98111 22233',accompanying:2,
+       count:3,family:true,preferred:[],donation:11000,receipt:'RCP-11001',extraRequested:1,extraBeds:1,roomsRequested:1,
+       checkin:'2026-08-14',checkout:'2026-08-17',stays:[{checkin:'2026-08-14',checkout:'2026-08-17',extra:true}],
+       sevaCollected:true,sevaChannel:'GuestHouse',sevaDate:'2026-08-10',donationVerified:true,guestType:'FR',status:'confirmed',hotel:'h1',roomType:'2-bed',rooms:1,note:'Prefer ground floor if possible', created:Date.now()-86400000*3},
+      {id:'b2',brahmachari:'Nitai Das',head:'Vijay Kumar',accompanying:1,children:0,
+       count:2,family:true,preferred:[],donation:5100,receipt:'RCP-11002',extraRequested:0,extraBeds:0,roomsRequested:1,
+       checkin:'2026-08-15',checkout:'2026-08-16',stays:[{checkin:'2026-08-15',checkout:'2026-08-16',extra:false}],
+       status:'pending',hotel:'',roomType:'',rooms:0,note:'', created:Date.now()-86400000},
+      {id:'b3',brahmachari:'Gopal Das',head:'Suresh Patel',accompanying:0,children:0,
+       count:1,family:false,preferred:[],donation:2100,receipt:'RCP-11003',extraRequested:0,extraBeds:0,roomsRequested:1,
+       checkin:'2026-08-14',checkout:'2026-08-18',stays:[{checkin:'2026-08-14',checkout:'2026-08-18',extra:false}],
+       status:'pending',hotel:'',roomType:'',rooms:0,note:'', created:Date.now()-3600000*5},
+
+      {id:'b4',brahmachari:'Gopal Das',head:'Anil Gupta',phone:'+91 90011 20001',guestType:'FR',accompanying:1,
+       count:2,family:true,preferred:[],donation:300000,receipt:'RCP-20001',extraRequested:0,extraBeds:0,roomsRequested:1,
+       checkin:'2026-08-20',checkout:'2026-08-24',stays:[{checkin:'2026-08-20',checkout:'2026-08-24',extra:false}],
+       donationVerified:true,status:'confirmed',hotel:'h1',roomType:'2-bed',rooms:1,note:'VIP donor', created:Date.now()-86400000*4},
+
+      {id:'b5',brahmachari:'Nitai Das',head:'Mohan Rao',phone:'+91 90011 20002',guestType:'PR',accompanying:1,
+       count:2,family:true,preferred:[],donation:0,receipt:'',extraRequested:0,extraBeds:0,roomsRequested:1,
+       checkin:'2026-08-21',checkout:'2026-08-23',stays:[{checkin:'2026-08-21',checkout:'2026-08-23',extra:false}],
+       status:'confirmed',hotel:'h1',roomType:'2-bed',rooms:1,note:'PR guest of temple', created:Date.now()-86400000*2},
+
+      {id:'b6',brahmachari:'Gopal Das',head:'Kavita Press',phone:'+91 90011 20003',guestType:'Media',accompanying:0,
+       count:1,family:false,preferred:[],donation:0,receipt:'',extraRequested:0,extraBeds:0,roomsRequested:1,
+       checkin:'2026-08-22',checkout:'2026-08-24',stays:[{checkin:'2026-08-22',checkout:'2026-08-24',extra:false}],
+       status:'pending',hotel:'',roomType:'',rooms:0,note:'Covering the festival', created:Date.now()-3600000*3},
+
+      {id:'b7',brahmachari:'Nitai Das',head:'Deepak Seva',phone:'+91 90011 20004',guestType:'Volunteer',accompanying:0,
+       count:1,family:false,preferred:[],donation:0,receipt:'',extraRequested:0,extraBeds:0,roomsRequested:1,
+       checkin:'2026-08-20',checkout:'2026-08-25',stays:[{checkin:'2026-08-20',checkout:'2026-08-25',extra:false}],
+       status:'confirmed',hotel:'h4',roomType:'2-bed',rooms:1,note:'Kitchen seva volunteer', created:Date.now()-86400000},
+
+      {id:'b8',brahmachari:'Gopal Das',head:'Ramu Yadav',phone:'+91 90011 20005',guestType:'FR',accompanying:1,
+       count:2,family:true,preferred:[],donation:1500,receipt:'RCP-20002',extraRequested:0,extraBeds:0,roomsRequested:1,
+       checkin:'2026-08-23',checkout:'2026-08-24',stays:[{checkin:'2026-08-23',checkout:'2026-08-24',extra:false}],
+       status:'pending',hotel:'',roomType:'',rooms:0,note:'', created:Date.now()-3600000*2},
+
+      {id:'b9',brahmachari:'Nitai Das',head:'Sharma Family',phone:'+91 90011 20006',guestType:'FR',accompanying:1,
+       count:2,family:true,preferred:[],donation:8000,receipt:'RCP-20003',extraRequested:0,extraBeds:0,roomsRequested:1,
+       checkin:'2026-09-03',checkout:'2026-09-07',stays:[{checkin:'2026-09-03',checkout:'2026-09-07',extra:false}],
+       sevaCollected:true,sevaChannel:'GPP',sevaDate:'2026-09-01',donationVerified:true,status:'confirmed',hotel:'h3',roomType:'2-bed',rooms:1,note:'Stays past 5 Sep — extends to Braj Nidhi', created:Date.now()-86400000*3},
+
+      {id:'b10',brahmachari:'Gopal Das',head:'Joshi Group',phone:'+91 90011 20007',guestType:'FR',accompanying:3,
+       count:4,family:true,preferred:[],donation:6000,receipt:'RCP-20004',extraRequested:0,extraBeds:0,roomsRequested:2,
+       checkin:'2026-08-20',checkout:'2026-08-22',stays:[{checkin:'2026-08-20',checkout:'2026-08-22',extra:false},{checkin:'2026-08-20',checkout:'2026-08-22',extra:false}],
+       sevaCollected:true,sevaChannel:'Devotee',sevaDate:'2026-08-18',donationVerified:true,locked:true,status:'confirmed',hotel:'h3',roomType:'2-bed',rooms:2,roomPlan:[{type:'2-bed',rooms:2}],note:'Two families — locked', created:Date.now()-86400000*2},
+
+      {id:'b11',brahmachari:'Nitai Das',head:'Ravi Kumar',phone:'+91 90011 20008',guestType:'FR',accompanying:0,
+       count:1,family:false,preferred:[],donation:3000,receipt:'RCP-20005',extraRequested:0,extraBeds:0,roomsRequested:1,
+       checkin:'2026-08-20',checkout:'2026-08-21',stays:[{checkin:'2026-08-20',checkout:'2026-08-21',extra:false}],
+       status:'cancelled',hotel:'',roomType:'',rooms:0,note:'Guest cancelled trip', created:Date.now()-86400000},
+
+      {id:'b12',brahmachari:'Gopal Das',head:'Mehta Family',phone:'+91 90011 20009',guestType:'FR',accompanying:1,
+       count:2,family:true,preferred:[],donation:350000,receipt:'RCP-20006',extraRequested:0,extraBeds:0,roomsRequested:1,
+       checkin:'2026-08-20',checkout:'2026-08-23',stays:[{checkin:'2026-08-20',checkout:'2026-08-23',extra:false}],
+       donationVerified:true,status:'confirmed',hotel:'h3',roomType:'2-bed',rooms:1,note:'₹3.5L donor currently in Hide Away — should move to Braj Nidhi', created:Date.now()-86400000*2},
+      ...extra,
+    ],
+    notifications:[
+      {id:'n1',ts:Date.now()-1800000,kind:'new',msg:'New request: Suresh Patel (1 person) — 1 room',brahmachari:'Gopal Das',bookingId:'b3',ack:false},
+      {id:'n2',ts:Date.now()-5400000,kind:'edit',msg:'Edited request: Vijay Kumar (2 people)',brahmachari:'Nitai Das',bookingId:'b2',ack:false},
+      {id:'n3',ts:Date.now()-86400000,kind:'new',msg:'New request: Ramesh Sharma (3 people) — 1 room, 1 extra bed',brahmachari:'Gopal Das',bookingId:'b1',ack:true},
+    ],
+    rules:{ d1Min:250000, d2Min:2000, freeMin:50000, eventStart:'2026-09-01', eventEnd:'2026-09-10', categoryHotels:{ D1:['h1','h2'], D2:['h3'], D3:['h4'] }, guestTypeHotels:{ PR:['h1'], Media:['h1'], Volunteer:['h4'] } }
+  };
+}
+const DEFAULT_RULES={ d1Min:250000, d2Min:2000, freeMin:50000, eventStart:'2026-09-01', eventEnd:'2026-09-10', categoryHotels:{ D1:['h1','h2'], D2:['h3'], D3:['h4'] }, guestTypeHotels:{ PR:['h1'], Media:['h1'], Volunteer:['h4'] } };
+function defaultDB(){ return { hotels:[], bookings:[], notifications:[], rules:JSON.parse(JSON.stringify(DEFAULT_RULES)), assign:{}, loginList:[], creds:{} }; }
+let DB = defaultDB();
+let _saveTimer=null;
+function save(){ if(!USER) return; clearTimeout(_saveTimer); _saveTimer=setTimeout(()=>{ syncToCloud().catch(e=>console.warn('sync',e)); }, 400); }
+/* ---- Supabase data layer ---- */
+/* Categories (high→low): H1 ₹25L+ · H2 ₹11–25L · H3 ₹5–11L · H4 ₹2.5–5L · D2 ₹50k–2.5L · D3 <₹50k.
+   H1/H2/H3/H4 all get Braj Nidhi (top tier). */
+function catFloor(cat){ const r=DB.rules; return cat==='H1'?2500000:cat==='H2'?1100000:cat==='H3'?500000:cat==='H4'?(r.d1Min||0):cat==='D2'?(r.d2Min||0):0; }
+function computeCat(amt){ const r=DB.rules, d=Number(amt)||0; return d>=2500000?'H1':d>=1100000?'H2':d>=500000?'H3':d>=r.d1Min?'H4':d>=r.d2Min?'D2':'D3'; }
+function isTopCat(c){ return c==='H1'||c==='H2'||c==='H3'||c==='H4'; }   // all get Braj Nidhi
+function bookingData(b){ const d=Object.assign({},b); delete d.donation; delete d.receipt; delete d.donationVerified; delete d.receiptWrong; delete d.devId; d.donationCategory=computeCat(b.donation);
+  d.freeStay = (USER && USER.role==='vcm') ? !!b.freeStay : ((Number(b.donation)||0) >= DB.rules.freeMin);  // ₹50k+ = free stay; set by whoever has the real amount, preserved by VCM
+  return d; }
+function isFreeStay(b){ return (b.freeStay!==undefined) ? !!b.freeStay : ((b.donation||0) >= DB.rules.freeMin); }
+async function loadFromCloud(){
+  const role=USER.role;
+  const isAdmin=role==='admin', wantAmounts=(role==='admin'||role==='brahmachari'), wantNotifs=(role==='admin'||role==='vcm');
+  const none=Promise.resolve({data:[]});
+  // Fetch EVERYTHING this role needs in ONE parallel batch (fast login)
+  const [hotelsR, rulesR, bookingsR, donationsR, notifsR, amtR, prR, crR] = await Promise.all([
+    sb.from('hotels').select('data'),
+    sb.from('rules').select('data').eq('id',1).maybeSingle(),
+    sb.from('bookings').select('id,data,dev_id'),
+    sb.from('donations').select('booking_id,receipt,donation_verified,receipt_wrong'),
+    wantNotifs ? sb.from('notifications').select('id,data,ack,ts').order('ts',{ascending:false}).limit(300) : none,
+    wantAmounts ? sb.from('amounts').select('booking_id,amount') : none,
+    isAdmin ? sb.from('profiles').select('login_id,role,assigned_name') : none,
+    isAdmin ? sb.from('credentials').select('login_id,pw') : none
+  ]);
+  // If the server returned an error, KEEP the current data (never wipe the screen on a transient failure)
+  if(hotelsR.error||bookingsR.error){ console.warn('Cloud load error — keeping current data', hotelsR.error||bookingsR.error); return; }
+  if(Array.isArray(hotelsR.data)) DB.hotels=hotelsR.data.map(r=>r.data).sort((a,b)=>(a.priority||99)-(b.priority||99));
+  if(rulesR && rulesR.data && rulesR.data.data) DB.rules=Object.assign(JSON.parse(JSON.stringify(DEFAULT_RULES)),rulesR.data.data);
+  const dmap={}; (donationsR.data||[]).forEach(d=>dmap[d.booking_id]=d);
+  const amap={}; (amtR.data||[]).forEach(a=>amap[a.booking_id]=Number(a.amount));
+  if(Array.isArray(bookingsR.data)) DB.bookings=bookingsR.data.map(r=>{ const b=Object.assign({},r.data); b.id=r.id; b.devId=r.dev_id||''; const d=dmap[r.id]; if(d){ b.receipt=d.receipt||''; b.donationVerified=!!d.donation_verified; b.receiptWrong=!!d.receipt_wrong; } b.donation = (amap[r.id]!=null) ? amap[r.id] : catFloor(b.donationCategory); return b; });
+  if(Array.isArray(notifsR.data)) DB.notifications=notifsR.data.map(n=>Object.assign({},n.data,{id:n.id,ack:!!n.ack,ts:n.ts?Date.parse(n.ts):Date.now()}));
+  if(isAdmin){ if(Array.isArray(prR.data)){ DB.assign={}; DB.loginList=[]; prR.data.forEach(p=>{ DB.loginList.push(p); DB.assign[p.login_id]=p.assigned_name||''; }); }
+    if(Array.isArray(crR.data)){ DB.creds={}; crR.data.forEach(c=>DB.creds[c.login_id]=c.pw); } }
+  syncHotelMinFromRules();
+  autoFixClosedBookings();   // repair any booking sitting in a hotel that's closed for its whole stay
+}
+/* Any confirmed booking assigned to a guest house that closes BEFORE its stay begins is invalid —
+   the guest can only be in the transfer house (Braj Nidhi). Move them automatically. Admin/VCM only,
+   and idempotent (once moved, the booking no longer matches). */
+function autoFixClosedBookings(){
+  if(!USER || !(USER.role==='admin'||USER.role==='vcm')) return false;
+  let changed=false;
+  DB.bookings.forEach(b=>{
+    if(b.status!=='confirmed' || !b.checkin) return;
+    const h=DB.hotels.find(x=>x.id===b.hotel);
+    if(h && h.availableUntil && h.transferTo && b.checkin>=h.availableUntil){
+      const tp=transferPlan(b), oldHotel=hotelName(b.hotel);
+      b.hotel=h.transferTo; b.roomType=tp.type; b.rooms=tp.rooms; b.roomPlan=null; b.transferRoomType=''; b.transferRooms=0;
+      b.edited=true; b.editedAt=Date.now(); b.editedBy='system'; b.lastEditNote='Guest house: '+oldHotel+' (closed for these dates) → '+hotelName(b.hotel)+' '+tp.type+' × '+tp.rooms+' (auto-corrected)';
+      notify('edit', (b.head?b.head+' — ':'')+'auto-moved to '+hotelName(b.hotel)+' ('+oldHotel+' is closed for these dates)', b.brahmachari||'', b.id);
+      changed=true;
+    }
+  });
+  if(changed) save();
+  return changed;
+}
+async function syncToCloud(){
+  if(!USER) return; const role=USER.role, mylogin=USER.id;
+  if(role==='staff') return;
+  const mine=DB.bookings.filter(b=> (role==='admin'||role==='vcm') ? true : b.devId===mylogin);
+  if(mine.length){
+    const up=await sb.from('bookings').upsert(mine.map(b=>({id:b.id,dev_id:b.devId||null,data:bookingData(b)})));
+    if(up.error){ console.warn('booking save failed', up.error); toast('⚠ Could not save to server — please check your connection and try again'); return; }
+    await sb.from('donations').upsert(mine.map(b=>({booking_id:b.id,receipt:b.receipt||'',donation_verified:!!b.donationVerified,receipt_wrong:!!b.receiptWrong})));
+    if(role!=='vcm'){ await sb.from('amounts').upsert(mine.map(b=>({booking_id:b.id,amount:Number(b.donation)||0}))); }
+  }
+  if(role==='admin') await sb.from('rules').upsert({id:1,data:DB.rules});
+  if((role==='admin'||role==='vcm') && DB.hotels.length) await sb.from('hotels').upsert(DB.hotels.map(h=>({id:h.id,data:h})));
+  if((role==='admin'||role==='vcm') && DB.notifications.length) await sb.from('notifications').upsert(DB.notifications.slice(0,300).map(n=>({id:n.id,data:n,ack:!!n.ack,ts:new Date(n.ts||Date.now()).toISOString()}))).then(()=>{},()=>{});
+}
+let _pollTimer=null;
+function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) return;
+  // NEVER auto-refresh while the user is filling or editing a form — it would wipe their input
+  if(currentTab==='newreq') return;
+  if(typeof editingId!=='undefined' && editingId) return;
+  const ae=document.activeElement; if(ae&&/INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;
+  try{ await loadFromCloud(); render(); if(USER.role==='admin'||USER.role==='vcm') updateNotifBadge(); }catch(e){}
+}, 15000); }
+function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
+/* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
 const APP_BUILD='2026-08-16-b80';
 async function checkForUpdate(){
   try{
