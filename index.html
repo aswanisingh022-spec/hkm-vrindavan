@@ -394,7 +394,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b84';
+const APP_BUILD='2026-08-16-b85';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -768,8 +768,25 @@ function buildTabs(){
   go(tabs[0][0]);
 }
 function go(k){ currentTab=k; document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.k===k)); render(); }
+/* ---------------- Maintenance mode (Super Admin can take the site offline for everyone else) ---------------- */
+function maintenanceOn(){ return !!(DB.rules && DB.rules.maintenance); }
+function maintenanceBlocked(){ return maintenanceOn() && !isSuper(); }
+function maintenanceHTML(){
+  return `<div style="min-height:60vh;display:flex;align-items:center;justify-content:center;padding:30px">
+    <div class="card" style="max-width:540px;text-align:center;padding:44px 30px">
+      <div style="font-size:44px;margin-bottom:8px">🙏</div>
+      <h1 style="color:var(--saffron-dark);margin:0 0 16px;font-size:32px">Hare Krishna</h1>
+      <p style="font-size:17px;line-height:1.7;color:#444;margin:0">Dear Devotees, we are updating the website.<br>We will soon be back.</p>
+    </div>
+  </div>`;
+}
+function toggleMaintenance(){ if(!isSuper()) return;
+  DB.rules.maintenance = !DB.rules.maintenance;
+  save(); render();
+  toast(DB.rules.maintenance ? 'Website is now OFFLINE for devotees, VCM & staff' : 'Website is now LIVE for everyone'); }
 function render(){
   const b=$('#pageBody');
+  if(maintenanceBlocked()){ const t=$('#tabs'); if(t)t.innerHTML=''; b.innerHTML=maintenanceHTML(); return; }
   if(USER.role==='admin'||USER.role==='vcm'){
     if(currentTab==='dash') b.innerHTML=viewDash();
     if(currentTab==='requests') b.innerHTML=viewRequests();
@@ -2145,7 +2162,16 @@ function viewSettings(){
   const r=DB.rules, inr=n=>'₹'+Number(n||0).toLocaleString('en-IN');
   const hotelCheck=(cat)=>DB.hotels.map(h=>`<label style="display:flex;gap:7px;align-items:center;margin:4px 0;font-weight:500">
       <input type="checkbox" style="width:auto" ${(r.categoryHotels[cat]||[]).includes(h.id)?'checked':''} onchange="toggleCatHotel('${cat}','${h.id}')"> ${esc(h.name)}</label>`).join('');
-  return `<div class="card"><h2 class="section">🎪 Festival booking window</h2>
+  return `<div class="card" style="border:2px solid ${r.maintenance?'var(--red)':'var(--green)'}">
+    <h2 class="section">🛠️ Website status</h2>
+    <p class="subhead">Controls what Devotees, VCM Guest House and Staff see. You (Super Admin) always keep full access.</p>
+    <div class="flex" style="align-items:center;gap:14px;flex-wrap:wrap">
+      <span class="pill ${r.maintenance?'p-rejected':'p-confirmed'}" style="font-size:14px">${r.maintenance?'⏸️ OFFLINE — maintenance message is showing':'🟢 LIVE — everyone can use the site'}</span>
+      <button class="btn ${r.maintenance?'green':'red'}" onclick="toggleMaintenance()">${r.maintenance?'▶️ Make website LIVE':'⏸️ Take website OFFLINE'}</button>
+    </div>
+    <p class="muted" style="margin-top:8px">When OFFLINE, Devotees, VCM Guest House and Staff see: “Hare Krishna — Dear Devotees, we are updating the website. We will soon be back.” Changes apply to them within ~2 minutes.</p>
+    </div>
+    <div class="card"><h2 class="section">🎪 Festival booking window</h2>
     <p class="subhead">Devotees can only book stays within these dates. Only the Super Admin can change this.</p>
     <div class="grid g2">
       <div><label>Booking from</label><input type="date" value="${r.eventStart}" onchange="setEventDate('eventStart',this.value)"></div>
