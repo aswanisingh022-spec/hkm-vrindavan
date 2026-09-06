@@ -394,7 +394,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b87';
+const APP_BUILD='2026-08-16-b88';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -660,7 +660,7 @@ function ensureTiers(){ const m=DB.rules&&DB.rules.categoryHotels; if(!m) return
 /* Hotels a donation category is mapped to (per-tier H1..H4 / D2 / D3); empty = no restriction. */
 function catHotelsFor(cat){ ensureTiers(); const m=DB.rules.categoryHotels||{}; if(m[cat]&&m[cat].length) return m[cat]; if(isTopCat(cat)&&m.D1&&m.D1.length) return m.D1; return m[cat]||[]; }
 /* Guest-type mapping: PR/Media/Volunteer by guestType, or 'Kind' for kind donors. */
-function typeKeyFor(b){ const gt=b.guestType||'FR'; if(gt!=='FR') return gt; if(b.sevaPlan==='kind') return 'Kind'; return null; }
+function typeKeyFor(b){ const gt=b.guestType||'FR'; return gt!=='FR'?gt:null; }  /* Kind donors follow their donation amount's category, not a fixed hotel */
 function typeHotelsFor(b){ const k=typeKeyFor(b); const m=DB.rules.guestTypeHotels||{}; return k?(m[k]||[]):[]; }
 function reservedHotelIds(){ ensureTiers(); const m=DB.rules.categoryHotels||{}; const inLow=new Set([...(m.D2||[]),...(m.D3||[])]);
   const top=new Set([...(m.D1||[]),...(m.H1||[]),...(m.H2||[]),...(m.H3||[]),...(m.H4||[])]);
@@ -2221,15 +2221,13 @@ function viewSettings(){
       <div class="card"><h2 class="section" style="margin:0 0 6px">H3 → guest houses</h2>${hotelCheck('H3')}</div>
       <div class="card"><h2 class="section" style="margin:0 0 6px">H4 → guest houses</h2>${hotelCheck('H4')}</div>
       <div class="card"><h2 class="section" style="margin:0 0 6px">D2 → guest houses</h2>${hotelCheck('D2')}</div>
-      <div class="card"><h2 class="section" style="margin:0 0 6px">D3 → guest houses</h2>${hotelCheck('D3')}</div>
     </div></div>
-    <div class="card"><h2 class="section" style="margin:0 0 4px">🎫 Which hotel does each guest type get? — PR / Media / Volunteer / Kind Donor</h2>
-    <p class="subhead">These override the donation category above. Tick the guest house(s) each guest type is sent to. Leave blank to use the normal donation-category rules instead.</p>
+    <div class="card"><h2 class="section" style="margin:0 0 4px">🎫 Which hotel does each guest type get? — PR / Media / Volunteer</h2>
+    <p class="subhead">These override the donation category above. Tick the guest house(s) each guest type is sent to. Leave blank to use the normal donation-category rules instead. (Kind Donors follow their donation amount's category, like a normal donor.)</p>
     <div class="grid g3">
       <div class="card"><h2 class="section" style="margin:0 0 6px">PR guests</h2>${typeCheck('PR')}</div>
       <div class="card"><h2 class="section" style="margin:0 0 6px">Media guests</h2>${typeCheck('Media')}</div>
       <div class="card"><h2 class="section" style="margin:0 0 6px">Volunteer guests</h2>${typeCheck('Volunteer')}</div>
-      <div class="card"><h2 class="section" style="margin:0 0 6px">Kind Donor</h2>${typeCheck('Kind')}</div>
     </div></div>`;
 }
 function viewDonations(){
