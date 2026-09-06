@@ -394,7 +394,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b86';
+const APP_BUILD='2026-08-16-b87';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -412,9 +412,10 @@ if(!DB.rules) DB.rules=JSON.parse(JSON.stringify(DEFAULT_RULES));
 Object.keys(DEFAULT_RULES).forEach(k=>{ if(DB.rules[k]===undefined) DB.rules[k]=DEFAULT_RULES[k]; });
 let USER = null;
 /* keep each hotel's donation gate in sync with the category rules: hotels reserved only for D1 require d1Min, others are open */
-function syncHotelMinFromRules(){ const r=DB.rules, d2=new Set(r.categoryHotels.D2||[]), d3=new Set(r.categoryHotels.D3||[]);
-  DB.hotels.forEach(h=>{ const d1only=(r.categoryHotels.D1||[]).includes(h.id) && !d2.has(h.id) && !d3.has(h.id);
-    h.minDonation = d1only ? r.d1Min : 0; }); }
+function syncHotelMinFromRules(){ const r=DB.rules, m=r.categoryHotels||{}, d2=new Set(m.D2||[]), d3=new Set(m.D3||[]);
+  const top=new Set([...(m.D1||[]),...(m.H1||[]),...(m.H2||[]),...(m.H3||[]),...(m.H4||[])]);
+  DB.hotels.forEach(h=>{ const toponly=top.has(h.id) && !d2.has(h.id) && !d3.has(h.id);
+    h.minDonation = toponly ? r.d1Min : 0; }); }
 syncHotelMinFromRules();
 save();   // persist immediately so data survives closing the browser
 /* ---- roles & money privacy ---- */
@@ -651,15 +652,27 @@ function unassignedBookings(){ return DB.bookings.filter(b=>b.status==='pending'
 /* Build candidate plans across eligible hotels. If allowExtra is false, no extra beds are used.
    Respects a requested number of separate rooms (b.roomsRequested) as a minimum room count. */
 /* hotel ids reserved only for the top category D1 (Braj Nidhi, Madhav Kutir) */
-function reservedHotelIds(){ const map=DB.rules.categoryHotels; const inD2D3=new Set([...(map.D2||[]),...(map.D3||[])]);
-  return (map.D1||[]).filter(id=>!inD2D3.has(id)); }
+/* Migrate the legacy 'D1' top-tier list into per-tier H1..H4 once, and ensure a Kind-donor guest-type key exists. */
+function ensureTiers(){ const m=DB.rules&&DB.rules.categoryHotels; if(!m) return;
+  if(m.D1 && !('H1'in m)&&!('H2'in m)&&!('H3'in m)&&!('H4'in m)){ const d1=(m.D1||[]).slice(); m.H1=d1.slice(); m.H2=d1.slice(); m.H3=d1.slice(); m.H4=d1.slice(); delete m.D1; }
+  if(!DB.rules.guestTypeHotels) DB.rules.guestTypeHotels={};
+  if(!('Kind'in DB.rules.guestTypeHotels)) DB.rules.guestTypeHotels.Kind=[]; }
+/* Hotels a donation category is mapped to (per-tier H1..H4 / D2 / D3); empty = no restriction. */
+function catHotelsFor(cat){ ensureTiers(); const m=DB.rules.categoryHotels||{}; if(m[cat]&&m[cat].length) return m[cat]; if(isTopCat(cat)&&m.D1&&m.D1.length) return m.D1; return m[cat]||[]; }
+/* Guest-type mapping: PR/Media/Volunteer by guestType, or 'Kind' for kind donors. */
+function typeKeyFor(b){ const gt=b.guestType||'FR'; if(gt!=='FR') return gt; if(b.sevaPlan==='kind') return 'Kind'; return null; }
+function typeHotelsFor(b){ const k=typeKeyFor(b); const m=DB.rules.guestTypeHotels||{}; return k?(m[k]||[]):[]; }
+function reservedHotelIds(){ ensureTiers(); const m=DB.rules.categoryHotels||{}; const inLow=new Set([...(m.D2||[]),...(m.D3||[])]);
+  const top=new Set([...(m.D1||[]),...(m.H1||[]),...(m.H2||[]),...(m.H3||[]),...(m.H4||[])]);
+  return [...top].filter(id=>!inLow.has(id)); }
 function buildPlans(b,allowExtra){
   const minRooms=Math.max(1, b.roomsRequested||1);
   const want=allowExtra?Math.max(0,b.extraRequested||0):0;   // extra beds the guest asked for (standard plan ignores)
   const gt=b.guestType||'FR';
-  const typed = gt!=='FR' && DB.rules.guestTypeHotels && (DB.rules.guestTypeHotels[gt]||[]).length;  // PR/Media/Volunteer → fixed hotel
-  const cat=guestCategory(b);                                // D1 / D2 / D3
-  const catList = typed ? DB.rules.guestTypeHotels[gt] : (DB.rules.categoryHotels[cat]||[]);  // suggested hotel(s)
+  const typeHotels = typeHotelsFor(b);                       // PR/Media/Volunteer/Kind → fixed hotel(s), if mapped
+  const typed = typeHotels.length>0;
+  const cat=guestCategory(b);                                // H1..H4 / D2 / D3
+  const catList = typed ? typeHotels : catHotelsFor(cat);    // hotels this guest is mapped to (empty = no restriction)
   const reserved=reservedHotelIds();                         // D1-only hotels — never for D2/D3
   // Is any ordinary (non-reserved, non-manual) guest house available to START this stay (open on check-in night)?
   const openGeneralExists=DB.hotels.some(h=> h.active && !h.manualOnly && !h.volunteerOnly && !reserved.includes(h.id)
@@ -674,6 +687,7 @@ function buildPlans(b,allowExtra){
       if(!openGeneralExists) return h.id==='h1';               // no other hotel can start these dates → offer ONLY Braj Nidhi, to every guest (bypass reserve + min gates)
       if(b.donation<(h.minDonation||0)) return false;         // FR hotel eligibility gate
       if(!isTopCat(cat) && reserved.includes(h.id)) return false; // reserved hotels only for D1 / H-tiers
+      if(catList.length && !catList.includes(h.id)) return false; // limit to the hotels marked for this category
       return true; }).forEach(h=>{
     const oEnd=hotelOriginEnd(h,b.checkin,b.checkout);         // the hotel hosts checkin → oEnd; the rest continues in Braj Nidhi
     h.rooms.forEach(r=>{
@@ -2154,15 +2168,21 @@ function viewSevaCollect(){
 function setRule(f,v){ DB.rules[f]=Math.max(0,parseInt(v)||0); syncHotelMinFromRules(); const c=recalcPending(); save(); render();
   toast('Rules updated — pending requests recalculated'+(c?` (${c} reset)`:'')); }
 function setEventDate(f,v){ if(!v) return; DB.rules[f]=v; save(); render(); toast('Festival booking window updated'); }
-function toggleCatHotel(cat,hid){ const map=DB.rules.categoryHotels; if(!map[cat])map[cat]=[];
+function toggleCatHotel(cat,hid){ ensureTiers(); const map=DB.rules.categoryHotels; if(!map[cat])map[cat]=catHotelsFor(cat).slice();
   const i=map[cat].indexOf(hid); if(i>=0)map[cat].splice(i,1); else map[cat].push(hid);
   syncHotelMinFromRules(); const c=recalcPending(); save(); render();
   toast('Category mapping updated — pending recalculated'+(c?` (${c} reset)`:'')); }
+function toggleTypeHotel(gt,hid){ ensureTiers(); const map=DB.rules.guestTypeHotels; if(!map[gt])map[gt]=[];
+  const i=map[gt].indexOf(hid); if(i>=0)map[gt].splice(i,1); else map[gt].push(hid);
+  const c=recalcPending(); save(); render();
+  toast(gt+' guests → hotel mapping updated'+(c?` (${c} reset)`:'')); }
 function viewSettings(){
   const r=DB.rules, inr=n=>'₹'+Number(n||0).toLocaleString('en-IN');
   const h1=r.h1Min||2500000, h2=r.h2Min||1100000, h3=r.h3Min||500000;
   const hotelCheck=(cat)=>DB.hotels.map(h=>`<label style="display:flex;gap:7px;align-items:center;margin:4px 0;font-weight:500">
-      <input type="checkbox" style="width:auto" ${(r.categoryHotels[cat]||[]).includes(h.id)?'checked':''} onchange="toggleCatHotel('${cat}','${h.id}')"> ${esc(h.name)}</label>`).join('');
+      <input type="checkbox" style="width:auto" ${catHotelsFor(cat).includes(h.id)?'checked':''} onchange="toggleCatHotel('${cat}','${h.id}')"> ${esc(h.name)}${h.manualOnly?' <span class="muted" style="font-size:11px">(manual only)</span>':''}${h.volunteerOnly?' <span class="muted" style="font-size:11px">(volunteers)</span>':''}</label>`).join('');
+  const typeCheck=(gt)=>DB.hotels.map(h=>`<label style="display:flex;gap:7px;align-items:center;margin:4px 0;font-weight:500">
+      <input type="checkbox" style="width:auto" ${((r.guestTypeHotels&&r.guestTypeHotels[gt])||[]).includes(h.id)?'checked':''} onchange="toggleTypeHotel('${gt}','${h.id}')"> ${esc(h.name)}</label>`).join('');
   return `<div class="card" style="border:2px solid ${r.maintenance?'var(--red)':'var(--green)'}">
     <h2 class="section">🛠️ Website status</h2>
     <p class="subhead">Controls what Devotees, VCM Guest House and Staff see. You (Super Admin) always keep full access.</p>
@@ -2193,11 +2213,24 @@ function viewSettings(){
     <p class="muted" style="margin-top:8px">H1 ≥ ${inr(h1)} &nbsp;·&nbsp; H2 = ${inr(h2)} to below ${inr(h1)} &nbsp;·&nbsp; H3 = ${inr(h3)} to below ${inr(h2)} &nbsp;·&nbsp; H4 = ${inr(r.d1Min)} to below ${inr(h3)} &nbsp;·&nbsp; D2 = ${inr(r.d2Min)} to below ${inr(r.d1Min)} &nbsp;·&nbsp; D3 = below ${inr(r.d2Min)} &nbsp;·&nbsp; Free stay ≥ ${inr(r.freeMin)}</p>
     <p class="muted" style="margin-top:4px">H1–H4 are top tier (Braj Nidhi guaranteed). Room guarantee: H1 → 5 · H2 → 3 · H3 → 2 · H4/D2 → 1 · D3 → 0.</p>
     </div>
+<div class="card"><h2 class="section" style="margin:0 0 4px">🏨 Which hotel does each type get? — donation category</h2>
+    <p class="subhead">Tick the guest house(s) suggested for each donation category. Leave a category blank to fall back to the default (any hotel the donation qualifies for). Feeds the auto-suggestion.</p>
     <div class="grid g3">
-      <div class="card"><h2 class="section" style="margin:0 0 6px">Top tier → guest houses</h2><p class="rooms-mini" style="margin:0 0 6px">Reserved for top donors (H1–H4)</p>${hotelCheck('D1')}</div>
+      <div class="card"><h2 class="section" style="margin:0 0 6px">H1 → guest houses</h2>${hotelCheck('H1')}</div>
+      <div class="card"><h2 class="section" style="margin:0 0 6px">H2 → guest houses</h2>${hotelCheck('H2')}</div>
+      <div class="card"><h2 class="section" style="margin:0 0 6px">H3 → guest houses</h2>${hotelCheck('H3')}</div>
+      <div class="card"><h2 class="section" style="margin:0 0 6px">H4 → guest houses</h2>${hotelCheck('H4')}</div>
       <div class="card"><h2 class="section" style="margin:0 0 6px">D2 → guest houses</h2>${hotelCheck('D2')}</div>
       <div class="card"><h2 class="section" style="margin:0 0 6px">D3 → guest houses</h2>${hotelCheck('D3')}</div>
-    </div>`;
+    </div></div>
+    <div class="card"><h2 class="section" style="margin:0 0 4px">🎫 Which hotel does each guest type get? — PR / Media / Volunteer / Kind Donor</h2>
+    <p class="subhead">These override the donation category above. Tick the guest house(s) each guest type is sent to. Leave blank to use the normal donation-category rules instead.</p>
+    <div class="grid g3">
+      <div class="card"><h2 class="section" style="margin:0 0 6px">PR guests</h2>${typeCheck('PR')}</div>
+      <div class="card"><h2 class="section" style="margin:0 0 6px">Media guests</h2>${typeCheck('Media')}</div>
+      <div class="card"><h2 class="section" style="margin:0 0 6px">Volunteer guests</h2>${typeCheck('Volunteer')}</div>
+      <div class="card"><h2 class="section" style="margin:0 0 6px">Kind Donor</h2>${typeCheck('Kind')}</div>
+    </div></div>`;
 }
 function viewDonations(){
   const rows=DB.bookings.map(b=>`<tr>
