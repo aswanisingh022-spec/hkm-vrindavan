@@ -373,16 +373,17 @@ function autoFixClosedBookings(){
 async function syncToCloud(){
   if(!USER) return; const role=USER.role, mylogin=USER.id;
   if(role==='staff') return;
-  const mine=DB.bookings.filter(b=> (role==='admin'||role==='vcm') ? true : b.devId===mylogin);
+  const allBk = (role==='admin'||role==='vcm'||role==='accounts');
+  const mine=DB.bookings.filter(b=> allBk ? true : b.devId===mylogin);
   if(mine.length){
     const up=await sb.from('bookings').upsert(mine.map(b=>({id:b.id,dev_id:b.devId||null,data:bookingData(b)})));
     if(up.error){ console.warn('booking save failed', up.error); toast('⚠ Could not save to server — please check your connection and try again'); return; }
     await sb.from('donations').upsert(mine.map(b=>({booking_id:b.id,receipt:b.receipt||'',donation_verified:!!b.donationVerified,receipt_wrong:!!b.receiptWrong})));
-    if(role!=='vcm'){ await sb.from('amounts').upsert(mine.map(b=>({booking_id:b.id,amount:Number(b.donation)||0}))); }
+    if(role!=='vcm' && role!=='accounts'){ await sb.from('amounts').upsert(mine.map(b=>({booking_id:b.id,amount:Number(b.donation)||0}))); }
   }
   if(role==='admin') await sb.from('rules').upsert({id:1,data:DB.rules});
   if((role==='admin'||role==='vcm') && DB.hotels.length) await sb.from('hotels').upsert(DB.hotels.map(h=>({id:h.id,data:h})));
-  if((role==='admin'||role==='vcm') && DB.notifications.length) await sb.from('notifications').upsert(DB.notifications.slice(0,300).map(n=>({id:n.id,data:n,ack:!!n.ack,ts:new Date(n.ts||Date.now()).toISOString()}))).then(()=>{},()=>{});
+  if((role==='admin'||role==='vcm'||role==='accounts') && DB.notifications.length) await sb.from('notifications').upsert(DB.notifications.slice(0,300).map(n=>({id:n.id,data:n,ack:!!n.ack,ts:new Date(n.ts||Date.now()).toISOString()}))).then(()=>{},()=>{});
 }
 let _pollTimer=null;
 function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) return;
@@ -394,7 +395,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b89';
+const APP_BUILD='2026-08-16-b90';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -421,6 +422,7 @@ save();   // persist immediately so data survives closing the browser
 /* ---- roles & money privacy ---- */
 function isSuper(){ return USER && USER.role==='admin'; }          // Super Admin
 function isVcm(){ return USER && USER.role==='vcm'; }              // VCM Guest House mini-admin
+function isAccounts(){ return USER && USER.role==='accounts'; }    // Accounts team — receipt verification only
 function seeMoney(){ return isSuper(); }                            // only Super Admin sees rupee amounts / receipts
 /* donation category from the current rules */
 function guestCategory(b){ if(!seeMoney() && b.donationCategory) return b.donationCategory; return computeCat(b.donation); }
@@ -729,7 +731,7 @@ function applySuggestion(id,which){ const b=DB.bookings.find(x=>x.id===id); if(!
   toast('Applied '+s.label+': '+s.hotel.name+' · '+s.roomType+' × '+s.rooms+(s.extra>0?' + '+s.extra+' extra bed':'')); }
 
 /* ---------------- Auth ---------------- */
-function roleLabel(r){ return r==='admin'?'Super Admin':r==='vcm'?'VCM Guest House':r==='staff'?'Staff':'Devotee'; }
+function roleLabel(r){ return r==='admin'?'Super Admin':r==='vcm'?'VCM Guest House':r==='staff'?'Staff':r==='accounts'?'Accounts Team':'Devotee'; }
 function saveLastLogin(){ try{ localStorage.setItem('hkm_lastLogin', JSON.stringify({id:USER.id,name:USER.name,role:USER.role,ts:Date.now()})); }catch(e){} }
 function getLastLogin(){ try{ return JSON.parse(localStorage.getItem('hkm_lastLogin')); }catch(e){ return null; } }
 function initLoginPrefill(){ const last=getLastLogin(); if(!last) return;
@@ -752,7 +754,7 @@ async function doLogin(){
     $('#loginView').classList.add('hidden');
     $('#appView').classList.remove('hidden');
     $('#whoName').textContent=USER.name;
-    $('#whoRole').textContent=(USER.role==='admin'?'Super Admin':USER.role==='vcm'?'VCM Guest House':USER.role==='staff'?'Staff (view only)':'Devotee')+' · '+USER.id;
+    $('#whoRole').textContent=(USER.role==='admin'?'Super Admin':USER.role==='vcm'?'VCM Guest House':USER.role==='staff'?'Staff (view only)':USER.role==='accounts'?'Accounts Team':'Devotee')+' · '+USER.id;
     buildTabs();
     startPoll();
   }catch(e){ toast('Login failed — check your connection'); console.warn(e); }
@@ -777,6 +779,8 @@ function buildTabs(){
     ? adminTabs
     : USER.role==='staff'
     ? [['dash','📊 Dashboard'],['seva','💰 To collect'],['rooms','🛏️ Room Allocations'],['vacancy','🪟 Vacancy'],['contacts','📇 Devotee Contact']]
+    : USER.role==='accounts'
+    ? [['receipts','🧾 Receipt Verification']]
     : [['newreq','➕ New Request'],['myreq','📋 My Requests']];
   $('#tabs').innerHTML = tabs.map(([k,l])=>`<div class="tab" data-k="${k}" onclick="go('${k}')">${l}</div>`).join('');
   go(tabs[0][0]);
@@ -824,6 +828,8 @@ function render(){
     if(currentTab==='rooms') b.innerHTML=viewStaffRooms();
     if(currentTab==='vacancy') b.innerHTML=viewStaffVacancy();
     if(currentTab==='contacts') b.innerHTML=viewContacts();
+  } else if(USER.role==='accounts'){
+    if(currentTab==='receipts') b.innerHTML=viewReceipts();
   } else {
     if(currentTab==='newreq') b.innerHTML=viewNewReq();
     if(currentTab==='myreq') b.innerHTML=viewMyReq();
@@ -2025,7 +2031,7 @@ function viewReceipts(){
   const list = receiptFilter==='verified' ? withReceipt.filter(b=>b.donationVerified)
              : receiptFilter==='all' ? withReceipt : unverified;
   const locked = !!DB.rules.vcmVerifyLocked;
-  const canVerify = isSuper() || !locked;   // VCM can verify only if the Super Admin has not locked it
+  const canVerify = isSuper() || isAccounts() || !locked;   // Accounts team & Super Admin always; VCM only if not locked
   const rows=list.map(b=>{ const rbg=b.receiptWrong?'#fdecec':(b.donationVerified?'#e7f7ed':'#f1f1f1'); return `<tr data-search="${esc(((b.head||'')+' '+(b.brahmachari||'')+' '+(b.receipt||'')+' '+(b.phone||'')).toLowerCase())}" style="background:${rbg}">
       <td><b>${headLabel(b)}</b></td>
       <td>${esc(devoteeName(b))}</td>
@@ -2257,7 +2263,7 @@ function copyStr(s,msg){ if(navigator.clipboard&&navigator.clipboard.writeText){
 function setAssign(id,val){ DB.assign=DB.assign||{}; DB.assign[id]=val.trim(); sb.from('profiles').update({assigned_name:val.trim()}).eq('login_id',id).then(()=>{},e=>console.warn('assign',e)); }
 function filterLoginRows(q){ q=(q||'').toLowerCase().trim();
   document.querySelectorAll('#loginRows tr').forEach(tr=>{ const s=tr.dataset.s||''; tr.style.display=s.includes(q)?'':'none'; }); }
-function loginRoleLabel(r){ return r==='admin'?'Super Admin':r==='vcm'?'Admin (VCM)':r==='staff'?'Staff':'Devotee'; }
+function loginRoleLabel(r){ return r==='admin'?'Super Admin':r==='vcm'?'Admin (VCM)':r==='staff'?'Staff':r==='accounts'?'Accounts Team':'Devotee'; }
 /* Copy the full login (ID + password + person's name) as text so it can be shared on WhatsApp */
 function copyLogin(id){
   const pw=(DB.creds&&DB.creds[id])||''; const name=(DB.assign&&DB.assign[id])||'';
