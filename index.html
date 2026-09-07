@@ -394,7 +394,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b88';
+const APP_BUILD='2026-08-16-b89';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -2026,7 +2026,7 @@ function viewReceipts(){
              : receiptFilter==='all' ? withReceipt : unverified;
   const locked = !!DB.rules.vcmVerifyLocked;
   const canVerify = isSuper() || !locked;   // VCM can verify only if the Super Admin has not locked it
-  const rows=list.map(b=>`<tr data-search="${esc(((b.head||'')+' '+(b.brahmachari||'')+' '+(b.receipt||'')+' '+(b.phone||'')).toLowerCase())}">
+  const rows=list.map(b=>{ const rbg=b.receiptWrong?'#fdecec':(b.donationVerified?'#e7f7ed':'#f1f1f1'); return `<tr data-search="${esc(((b.head||'')+' '+(b.brahmachari||'')+' '+(b.receipt||'')+' '+(b.phone||'')).toLowerCase())}" style="background:${rbg}">
       <td><b>${headLabel(b)}</b></td>
       <td>${esc(devoteeName(b))}</td>
       <td>${seeMoney()?money(b.donation):catBadge(b)}</td>
@@ -2040,7 +2040,7 @@ function viewReceipts(){
              ${b.receiptWrong
               ? `<button class="btn gray sm" onclick="clearReceiptWrong('${b.id}')">Clear</button>`
               : `<button class="btn red sm" onclick="markReceiptWrong('${b.id}')">✗ Wrong</button>`}</div>`}</td>
-    </tr>`).join('');
+    </tr>`; }).join('');
   const fbtn=(f,l)=>`<div class="tab ${receiptFilter===f?'active':''}" onclick="setReceiptFilter('${f}')">${l}</div>`;
   const lockBtn = isSuper()
     ? `<button class="btn ${locked?'red':'gray'} sm" onclick="toggleVcmVerify()">${locked?'🔒 VCM verify LOCKED — click to unlock':'🔓 Lock VCM verify access'}</button>`
