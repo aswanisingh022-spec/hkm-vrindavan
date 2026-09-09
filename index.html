@@ -395,7 +395,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b103';
+const APP_BUILD='2026-08-16-b104';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -1367,13 +1367,13 @@ function guestCell(b,withSug){
 /* Radha Ashtami allocation priority (guidance for the coordinator): tier by occasion + donation amount.
    P1 = Radha Ashtami ≥₹50K (1 free room/1 day, only if not in Janmashtami) · P2 = Janmashtami ≥₹2.5L · P3 = Janmashtami ₹1L–2.5L (paid) · P4 = Radha Ashtami below ₹50K (paid, pending) · P5 = Janmashtami below ₹1L (availability, pending). */
 function raTier(b){ const amt=Number(b.donation)||0, fest=(b.donFest==='RA')?'RA':'JM'; if((b.guestType||'FR')!=='FR') return null;
-  if(fest==='RA' && amt>=50000) return {n:1,cat:'Radha Ashtami ₹50K+',alloc:'1 FREE room · 1 day',charge:'Free only if they did NOT attend / take a room during Janmashtami. More than 1 room or more than 1 day → the extra goes to the waiting list on a PAID basis (collected by devotee / staff).'};
-  if(fest==='JM' && amt>=250000) return {n:2,cat:'Janmashtami ₹2.5L+',alloc:'1 room · 1 day',charge:'Anything extra will be charged.'};
-  if(fest==='JM' && amt>=100000) return {n:3,cat:'Janmashtami ₹1L–2.5L',alloc:'Room on PAID basis (as per availability)',charge:'Paid basis only, and only if they did NOT attend / take a room during Janmashtami.'};
-  if(fest==='RA') return {n:4,cat:'Radha Ashtami below ₹50K',alloc:'Paid room (as per availability)',charge:'Room is chargeable — collected by devotee / staff. Status stays Pending until the room is confirmed.'};
-  return {n:5,cat:'Janmashtami below ₹1L',alloc:'Paid room (as per availability)',charge:'Room is chargeable — collected by devotee / staff. Depends on availability, and status stays Pending until the room is confirmed.'}; }
+  if(fest==='RA' && amt>=50000) return {n:1,cat:'RA ₹50K+',alloc:'FREE',charge:'if no JNM room · extra paid'};
+  if(fest==='JM' && amt>=250000) return {n:2,cat:'JNM ₹2.5L+',alloc:'1 room',charge:'extra paid'};
+  if(fest==='JM' && amt>=100000) return {n:3,cat:'JNM ₹1L–2.5L',alloc:'PAID',charge:'if no JNM room'};
+  if(fest==='RA') return {n:4,cat:'RA <₹50K',alloc:'PAID',charge:''};
+  return {n:5,cat:'JNM <₹1L',alloc:'PAID',charge:''}; }
 function raTierTag(b){ const t=raTier(b); return t?` <span class="pill p-confirmed" title="${t.cat} — ${t.alloc} — ${t.charge}">P${t.n}</span>`:''; }
-function raTierNote(b){ const t=raTier(b); return t?`<div class="rooms-mini" style="margin-top:3px;color:#6c5ce7"><b>Priority ${t.n}</b> · ${t.cat} · Allocation: ${t.alloc} · ${t.charge}</div>`:''; }
+function raTierNote(b){ const t=raTier(b); return t?`<div class="rooms-mini" style="margin-top:3px;color:#6c5ce7"><b>P${t.n}</b> · ${t.cat} · ${t.alloc}${t.charge?' · '+t.charge:''}</div>`:''; }
 function reqSortVal(b){ const gt=b.guestType||'FR'; if(gt==='PR'||gt==='Media') return Infinity; const t=raTier(b); if(t) return (6-t.n)*1e12+(b.donation||0); return (b.donation||0); }  // PR/Media top, then priority tier H1→H5, then donation
 let reqSort='priority', bookedSort='priority';
 function setReqSort(v){ reqSort=v; render(); }
@@ -1620,7 +1620,7 @@ function devoteeStatusPill(b){
   else core='<span class="pill p-pending">Pending</span>';
   return core + waitNote; }
 /* Donation occasion — Janmashtami (JM) / Radha Ashtami (RA). Short forms for tight UI. */
-function donFestShort(b){ return b.donFest==='RA'?'RA':'JM'; }   /* default (incl. all older bookings) = Janmashtami */
+function donFestShort(b){ return b.donFest==='RA'?'RA':'JNM'; }   /* default (incl. all older bookings) = Janmashtami */
 function donFestLabel(b){ return b.donFest==='RA'?'Radha Ashtami':'Janmashtami'; }
 function donFestBadge(b){ return `<span class="pill p-edited" title="${donFestLabel(b)}">${donFestShort(b)}</span>`; }
 /* Super Admin & Accounts can correct the occasion if the receipt shows a discrepancy. */
@@ -2077,7 +2077,7 @@ function viewReceipts(){
       <td>${seeMoney()?money(b.donation):catBadge(b)}</td>
       <td><span class="rcp-copy" onclick="copyReceipt('${b.id}')" title="Click to copy — or select the text">${esc(b.receipt)}</span></td>
       <td>${(isSuper()||isAccounts())
-          ? `<select onchange="setDonFest('${b.id}',this.value)" style="width:auto;padding:2px 6px;font-size:12px" title="Correct the occasion if the receipt shows a discrepancy"><option value="JM" ${b.donFest!=='RA'?'selected':''}>JM (Janmashtami)</option><option value="RA" ${b.donFest==='RA'?'selected':''}>RA (Radha Ashtami)</option></select>`
+          ? `<select onchange="setDonFest('${b.id}',this.value)" style="width:auto;padding:2px 6px;font-size:12px" title="Correct the occasion if the receipt shows a discrepancy"><option value="JM" ${b.donFest!=='RA'?'selected':''}>JNM (Janmashtami)</option><option value="RA" ${b.donFest==='RA'?'selected':''}>RA (Radha Ashtami)</option></select>`
           : donFestBadge(b)}</td>
       <td>${b.receiptWrong?'<span class="pill p-rejected">✗ Wrong</span>':(b.donationVerified?'<span class="pill p-confirmed">Verified</span>':'<span class="pill p-pending">Unverified</span>')}</td>
       <td>${!canVerify
