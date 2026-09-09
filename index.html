@@ -395,7 +395,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b98';
+const APP_BUILD='2026-08-16-b99';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -1362,16 +1362,16 @@ function guestCell(b,withSug){
 
 /* ---------------- Admin: New Requests (not yet confirmed) ---------------- */
 /* Radha Ashtami allocation priority (guidance for the coordinator): tier by occasion + donation amount.
-   P1 = Radha Ashtami donor ≥₹50K · P2 = Janmashtami ≥₹2.5L · P3 = Janmashtami ₹1L–2.5L · P4 = Radha Ashtami ₹21K–50K. */
+   H1 = Radha Ashtami donor ≥₹50K · H2 = Janmashtami ≥₹2.5L · H3 = Janmashtami ₹1L–2.5L · H4 = Radha Ashtami ₹21K–50K · H5 = below ₹21K (down to 0). */
 function raTier(b){ const amt=Number(b.donation)||0, fest=(b.donFest==='RA')?'RA':'JM'; if((b.guestType||'FR')!=='FR') return null;
   if(fest==='RA' && amt>=50000) return {n:1,cat:'Radha Ashtami ₹50K+',alloc:'1 room · 1 day',charge:'Extra room or day will be charged'};
-  if(fest==='JM' && amt>=250000) return {n:2,cat:'JNM ₹2.5L',alloc:'1 room · 1 day',charge:'Anything extra will be charged'};
-  if(fest==='JM' && amt>=100000) return {n:3,cat:'JNM ₹1L',alloc:'As per availability',charge:'Room will be charged'};
-  if(fest==='RA' && amt>=21000) return {n:4,cat:'RA ₹21K',alloc:'As per availability',charge:'Room will be charged'};
-  return null; }
-function raTierTag(b){ const t=raTier(b); return t?` <span class="pill p-confirmed" title="${t.cat} — ${t.alloc} — ${t.charge}">P${t.n}</span>`:''; }
-function raTierNote(b){ const t=raTier(b); return t?`<div class="rooms-mini" style="margin-top:3px;color:#6c5ce7">🏅 <b>Priority ${t.n}</b> · ${t.cat} · Allocation: ${t.alloc} · ${t.charge}</div>`:''; }
-function reqSortVal(b){ const gt=b.guestType||'FR'; if(gt==='PR'||gt==='Media') return Infinity; const t=raTier(b); if(t) return (5-t.n)*1e12+(b.donation||0); return (b.donation||0); }  // PR/Media top, then priority tier P1→P4, then donation
+  if(fest==='JM' && amt>=250000) return {n:2,cat:'Janmashtami ₹2.5L+',alloc:'1 room · 1 day',charge:'Anything extra will be charged'};
+  if(fest==='JM' && amt>=100000) return {n:3,cat:'Janmashtami ₹1L–2.5L',alloc:'As per availability',charge:'Room will be charged'};
+  if(fest==='RA' && amt>=21000) return {n:4,cat:'Radha Ashtami ₹21K–50K',alloc:'As per availability',charge:'Room will be charged'};
+  return {n:5,cat:'Below ₹21K',alloc:'As per availability',charge:'Room will be charged'}; }
+function raTierTag(b){ const t=raTier(b); return t?` <span class="pill p-confirmed" title="${t.cat} — ${t.alloc} — ${t.charge}">H${t.n}</span>`:''; }
+function raTierNote(b){ const t=raTier(b); return t?`<div class="rooms-mini" style="margin-top:3px;color:#6c5ce7"><b>Priority H${t.n}</b> · ${t.cat} · Allocation: ${t.alloc} · ${t.charge}</div>`:''; }
+function reqSortVal(b){ const gt=b.guestType||'FR'; if(gt==='PR'||gt==='Media') return Infinity; const t=raTier(b); if(t) return (6-t.n)*1e12+(b.donation||0); return (b.donation||0); }  // PR/Media top, then priority tier H1→H5, then donation
 let reqSort='priority', bookedSort='priority';
 function setReqSort(v){ reqSort=v; render(); }
 /* Requests filter — by receipt approval or donation band (VCM sees the category floor; Super Admin the exact amount). */
@@ -2273,7 +2273,36 @@ function viewSettings(){
       <div class="card"><h2 class="section" style="margin:0 0 6px">PR guests</h2>${typeCheck('PR')}</div>
       <div class="card"><h2 class="section" style="margin:0 0 6px">Media guests</h2>${typeCheck('Media')}</div>
       <div class="card"><h2 class="section" style="margin:0 0 6px">Volunteer guests</h2>${typeCheck('Volunteer')}</div>
-    </div></div>`;
+    </div></div>
+    <div class="card" style="border:2px solid var(--red)">
+    <h2 class="section" style="color:var(--red)">🗑️ Danger zone — Hard delete all data</h2>
+    <p class="subhead">Permanently deletes <b>all</b> bookings, receipts, donation amounts and alerts. This cannot be undone. Enter the security PIN to enable the delete button.</p>
+    <div class="flex" style="align-items:center;gap:10px;flex-wrap:wrap">
+      <input id="wipePin" type="password" inputmode="numeric" placeholder="Enter PIN" style="max-width:160px" oninput="var b=document.getElementById('wipeBtn'); if(b) b.disabled=(this.value.trim()==='');">
+      <button id="wipeBtn" class="btn red" disabled onclick="hardWipeAll()">Delete ALL data</button>
+    </div>
+    <p class="muted" style="margin-top:8px">You will be asked to confirm once more before anything is deleted.</p>
+    </div>`;
+}
+async function hardWipeAll(){
+  const pin=(($('#wipePin')||{}).value||'').trim();
+  if(!pin){ toast('Enter the PIN first'); return; }
+  if(!confirm('This will PERMANENTLY delete ALL bookings, receipts, amounts and alerts. This cannot be undone. Continue?')) return;
+  const btn=$('#wipeBtn'); if(btn){ btn.disabled=true; btn.textContent='Deleting…'; }
+  try{
+    const {data,error}=await sb.rpc('admin_wipe_all_data',{pin});
+    if(error){
+      if(error.message&&error.message.indexOf('INVALID_PIN')>=0) toast('❌ Wrong PIN — nothing was deleted');
+      else if(error.message&&error.message.indexOf('NOT_ADMIN')>=0) toast('❌ Only Super Admin can do this');
+      else toast('❌ Delete failed: '+error.message);
+      if(btn){ btn.disabled=false; btn.textContent='Delete ALL data'; }
+      return;
+    }
+    DB.bookings=[]; DB.notifications=[];
+    toast('✅ All data deleted');
+    try{ await loadFromCloud(); }catch(e){}
+    render();
+  }catch(e){ toast('❌ '+e.message); if(btn){ btn.disabled=false; btn.textContent='Delete ALL data'; } }
 }
 function viewDonations(){
   const rows=DB.bookings.map(b=>`<tr>
