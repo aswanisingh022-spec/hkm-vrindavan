@@ -395,7 +395,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b93';
+const APP_BUILD='2026-08-16-b94';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -926,7 +926,7 @@ function viewNewReq(){
       <div><label>Donation amount (₹)</label><input id="reqDonation" type="number" min="0" placeholder="0" oninput="syncSevaPlan()" onchange="syncSevaPlan()"></div>
     </div>
     <div><label>Donation receipt number <span id="rcpStar" style="color:var(--red)">*</span></label><input id="reqReceipt" placeholder="Enter donation receipt number" oninput="checkReceipt()" onblur="checkReceipt()"><p id="rcpMsg" class="rooms-mini" style="margin:4px 0 0;color:var(--red);display:none">⚠ Please enter a correct receipt number</p></div>
-    <div style="margin-top:10px"><label>🎉 This donation was made for</label>
+    <div style="margin-top:10px"><label>This donation was made for</label>
       <select id="reqDonFest">
         <option value="JM">Janmashtami</option>
         <option value="RA">Radha Ashtami</option>
@@ -1599,7 +1599,7 @@ function devoteeStatusPill(b){
 /* Donation occasion — Janmashtami (JM) / Radha Ashtami (RA). Short forms for tight UI. */
 function donFestShort(b){ return b.donFest==='RA'?'RA':'JM'; }   /* default (incl. all older bookings) = Janmashtami */
 function donFestLabel(b){ return b.donFest==='RA'?'Radha Ashtami':'Janmashtami'; }
-function donFestBadge(b){ return `<span class="pill p-waitlist" title="${donFestLabel(b)}">🎉 ${donFestShort(b)}</span>`; }
+function donFestBadge(b){ return `<span class="pill p-edited" title="${donFestLabel(b)}">${donFestShort(b)}</span>`; }
 /* Super Admin & Accounts can correct the occasion if the receipt shows a discrepancy. */
 function setDonFest(id,val){ if(!(isSuper()||isAccounts())) return; const b=DB.bookings.find(x=>x.id===id); if(!b)return;
   b.donFest=val; save(); render(); toast('Occasion set to '+donFestLabel(b)); }
