@@ -395,7 +395,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b92';
+const APP_BUILD='2026-08-16-b93';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -1597,8 +1597,8 @@ function devoteeStatusPill(b){
   else core='<span class="pill p-pending">Pending</span>';
   return core + waitNote; }
 /* Donation occasion — Janmashtami (JM) / Radha Ashtami (RA). Short forms for tight UI. */
-function donFestShort(b){ return b.donFest==='JM'?'JM':b.donFest==='RA'?'RA':'—'; }
-function donFestLabel(b){ return b.donFest==='JM'?'Janmashtami':b.donFest==='RA'?'Radha Ashtami':'Not set'; }
+function donFestShort(b){ return b.donFest==='RA'?'RA':'JM'; }   /* default (incl. all older bookings) = Janmashtami */
+function donFestLabel(b){ return b.donFest==='RA'?'Radha Ashtami':'Janmashtami'; }
 function donFestBadge(b){ return `<span class="pill p-waitlist" title="${donFestLabel(b)}">🎉 ${donFestShort(b)}</span>`; }
 /* Super Admin & Accounts can correct the occasion if the receipt shows a discrepancy. */
 function setDonFest(id,val){ if(!(isSuper()||isAccounts())) return; const b=DB.bookings.find(x=>x.id===id); if(!b)return;
@@ -2053,7 +2053,7 @@ function viewReceipts(){
       <td>${seeMoney()?money(b.donation):catBadge(b)}</td>
       <td><span class="rcp-copy" onclick="copyReceipt('${b.id}')" title="Click to copy — or select the text">${esc(b.receipt)}</span></td>
       <td>${(isSuper()||isAccounts())
-          ? `<select onchange="setDonFest('${b.id}',this.value)" style="width:auto;padding:2px 6px;font-size:12px" title="Correct the occasion if the receipt shows a discrepancy"><option value="" ${!b.donFest?'selected':''}>—</option><option value="JM" ${b.donFest==='JM'?'selected':''}>JM (Janmashtami)</option><option value="RA" ${b.donFest==='RA'?'selected':''}>RA (Radha Ashtami)</option></select>`
+          ? `<select onchange="setDonFest('${b.id}',this.value)" style="width:auto;padding:2px 6px;font-size:12px" title="Correct the occasion if the receipt shows a discrepancy"><option value="JM" ${b.donFest!=='RA'?'selected':''}>JM (Janmashtami)</option><option value="RA" ${b.donFest==='RA'?'selected':''}>RA (Radha Ashtami)</option></select>`
           : donFestBadge(b)}</td>
       <td>${b.receiptWrong?'<span class="pill p-rejected">✗ Wrong</span>':(b.donationVerified?'<span class="pill p-confirmed">Verified</span>':'<span class="pill p-pending">Unverified</span>')}</td>
       <td>${!canVerify
