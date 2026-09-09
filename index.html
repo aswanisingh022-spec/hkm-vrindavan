@@ -307,7 +307,7 @@ function seed(){
     rules:{ d1Min:250000, d2Min:2000, freeMin:50000, h1Min:2500000, h2Min:1100000, h3Min:500000, eventStart:'2026-09-01', eventEnd:'2026-09-10', categoryHotels:{ D1:['h1','h2'], D2:['h3'], D3:['h4'] }, guestTypeHotels:{ PR:['h1'], Media:['h1'], Volunteer:['h4'] } }
   };
 }
-const DEFAULT_RULES={ d1Min:250000, d2Min:2000, freeMin:50000, h1Min:2500000, h2Min:1100000, h3Min:500000, eventStart:'2026-09-01', eventEnd:'2026-09-10', categoryHotels:{ D1:['h1','h2'], D2:['h3'], D3:['h4'] }, guestTypeHotels:{ PR:['h1'], Media:['h1'], Volunteer:['h4'] } };
+const DEFAULT_RULES={ d1Min:250000, d2Min:2000, freeMin:50000, h1Min:2500000, h2Min:1100000, h3Min:500000, eventStart:'2026-09-01', eventEnd:'2026-09-10', roomLimits:{H1:5,H2:3,H3:2,H4:1,D2:1,D3:0}, categoryHotels:{ D1:['h1','h2'], D2:['h3'], D3:['h4'] }, guestTypeHotels:{ PR:['h1'], Media:['h1'], Volunteer:['h4'] } };
 function defaultDB(){ return { hotels:[], bookings:[], notifications:[], rules:JSON.parse(JSON.stringify(DEFAULT_RULES)), assign:{}, loginList:[], creds:{} }; }
 let DB = defaultDB();
 let _saveTimer=null;
@@ -395,7 +395,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b104';
+const APP_BUILD='2026-08-16-b105';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -924,7 +924,7 @@ function viewNewReq(){
           <option value="Media">Media</option>
           <option value="Volunteer">Volunteer</option>
         </select></div>
-      <div><label>Donation amount (₹)</label><input id="reqDonation" type="number" min="0" placeholder="0" oninput="syncSevaPlan()" onchange="syncSevaPlan()"></div>
+      <div><label>Donation amount (₹)</label><input id="reqDonation" type="number" min="0" placeholder="0" oninput="syncSevaPlan();updateExtraRoomUI()" onchange="syncSevaPlan();updateExtraRoomUI()"></div>
     </div>
     <div><label>Donation receipt number <span id="rcpStar" style="color:var(--red)">*</span></label><input id="reqReceipt" placeholder="Enter donation receipt number" oninput="checkReceipt()" onblur="checkReceipt()"><p id="rcpMsg" class="rooms-mini" style="margin:4px 0 0;color:var(--red);display:none">⚠ Please enter a correct receipt number</p></div>
     <div id="donFestWrap" style="margin-top:10px"><label>This donation was made for <span style="color:var(--red)">*</span></label>
@@ -943,6 +943,14 @@ function viewNewReq(){
         <option value="kind">Kind Donor</option>
       </select>
       <p class="rooms-mini" id="sevaPlanNote" style="margin:4px 0 0">Donation ₹50,000 or above → <b>FOC (free of cost)</b> is auto-selected; you may change it. Below ₹50,000 → FOC is not available; choose Devotee or Staff. This shows up for Staff, VCM Guest House and Super Admin.</p></div>
+    <div id="extraRoomWrap" style="margin-top:10px;background:#fdecec;border:1px solid #f3c2c2;border-radius:10px;padding:10px 14px;display:none">
+      <label style="margin-top:0;color:var(--red)">🚪 You asked for more rooms than your category allows — who will collect the extra-room amount? <span style="color:var(--red)">*</span></label>
+      <select id="reqExtraRoomPayer">
+        <option value="">— select —</option>
+        <option value="devotee">Devotee will arrange / collect the extra-room amount</option>
+        <option value="staff">Staff will collect the extra-room amount</option>
+      </select>
+      <p class="rooms-mini" id="extraRoomNote" style="margin:4px 0 0;color:var(--red)"></p></div>
     <p class="rooms-mini" style="margin:10px 0 0;color:var(--saffron-dark)">🎪 Festival stay only — check in between ${fmtD(DB.rules.eventStart)} and ${fmtD(prevDay(DB.rules.eventEnd))}, and check out by ${fmtD(DB.rules.eventEnd)} ${DB.rules.eventStart.slice(0,4)}.</p>
     <div id="dateRows"></div>
     <label>Note / special request to coordinator</label><textarea id="reqNote" rows="3" placeholder="e.g. any preference, medical need, elderly guest, arrival time... The admin will see this."></textarea>
@@ -960,6 +968,7 @@ function prefillEdit(){ if(!editingId) return; const b=DB.bookings.find(x=>x.id=
   set('#reqHead',b.head||''); set('#reqPhone',b.phone||''); set('#reqType',b.guestType||'FR'); updateTypeUI(); set('#reqTotal',b.count||1); updateSummary();
   set('#reqDonation',b.donation||''); set('#reqReceipt',b.receipt||''); { const df=b.donFest==='RA'?'RA':(b.donFest==='JM'?'JM':''); document.querySelectorAll('.donFestBox').forEach(c=>c.checked=(!!df&&c.value===df)); }
   set('#reqRooms',b.roomsRequested||1); set('#reqSevaPlan',b.sevaPlan||'devotee'); { const sp=$('#reqSevaPlan'); if(sp) sp.dataset.userTouched='1'; }
+  set('#reqExtraRoomPayer',b.extraRoomPayer||''); updateExtraRoomUI();
   (b.preferred||[]).forEach(pid=>{ const c=document.querySelector('.prefHotel[value="'+pid+'"]'); if(c) c.checked=true; });
   renderDateRows();
   const st=b.stays&&b.stays.length?b.stays:[{checkin:b.checkin,checkout:b.checkout,extra:(b.extraRequested>0)}];
@@ -973,12 +982,13 @@ function reqStepper(id,val){ return `<div class="stepper big">
     <button type="button" onclick="reqStep('${id}',1)">+</button></div>`; }
 function reqStep(id,delta){ const e=document.getElementById(id); if(!e)return;
   const min=(id==='reqRooms'||id==='reqTotal')?1:0; e.value=Math.max(min,(parseInt(e.value)||0)+delta); reqStepChanged(id); }
-function reqStepChanged(id){ if(id==='reqTotal') updateSummary(); if(id==='reqRooms') renderDateRows(); }
+function reqStepChanged(id){ if(id==='reqTotal') updateSummary(); if(id==='reqRooms'){ renderDateRows(); updateExtraRoomUI(); } }
 function updateSummary(){ const te=$('#reqTotal'); if(!te) return;
   const p=$('#sumPeople'); if(p) p.textContent=Math.max(1,parseInt(te.value)||1); }
 function updateTypeUI(){ const t=($('#reqType')||{}).value||'FR'; const note=$('#typeNote'), star=$('#rcpStar'); const dfw=$('#donFestWrap'); if(dfw) dfw.style.display=(t==='FR')?'':'none';
   if(t==='FR'){ if(note)note.textContent='FR Guest — donation receipt number is required.'; if(star)star.style.display=''; }
-  else { if(note)note.textContent=t+' guest — no receipt needed. You may leave donation and receipt blank.'; if(star)star.style.display='none'; } }
+  else { if(note)note.textContent=t+' guest — no receipt needed. You may leave donation and receipt blank.'; if(star)star.style.display='none'; }
+  updateExtraRoomUI(); }
 function pickDonFest(val){ const boxes=[...document.querySelectorAll('.donFestBox')]; const c=boxes.find(x=>x.value===val); if(c&&c.checked){ boxes.forEach(x=>{ if(x.value!==val) x.checked=false; }); } }
 function getDonFest(){ const c=[...document.querySelectorAll('.donFestBox')].find(x=>x.checked); return c?c.value:''; }
 function renderDateRows(){ const c=$('#dateRows'); if(!c) return;
@@ -1041,6 +1051,16 @@ function syncSevaPlan(){
     ? 'Donation is ₹50,000 or above → eligible for <b>FOC (free of cost)</b>. It is auto-selected; you may switch to Devotee or Staff if you prefer.'
     : 'Donation is below ₹50,000 → <b>FOC is not available</b>. Please choose Devotee or Staff to collect the seva.'; }
 }
+function updateExtraRoomUI(){ const wrap=$('#extraRoomWrap'); if(!wrap) return;
+  const gt=($('#reqType')||{}).value||'FR';
+  const amt=Math.max(0,Number(($('#reqDonation')||{}).value)||0);
+  const rooms=Math.max(1,parseInt(($('#reqRooms')||{}).value)||1);
+  const limit=guaranteedRooms(amt);
+  const show = gt==='FR' && amt>0 && rooms>limit;
+  wrap.style.display = show ? '' : 'none';
+  const note=$('#extraRoomNote');
+  if(show && note){ const extra=rooms-limit; note.textContent = `Your category allows ${limit} room${limit===1?'':'s'} — the other ${extra} room${extra===1?'':'s'} will be on a paid basis.`; }
+}
 function toggleSame(i){
   const ci0=document.querySelector('.ci[data-i="0"]').value, co0=document.querySelector('.co[data-i="0"]').value;
   const ci=document.querySelector('.ci[data-i="'+i+'"]'), co=document.querySelector('.co[data-i="'+i+'"]');
@@ -1075,7 +1095,12 @@ function submitReq(){
     if(s.checkout<=s.checkin){ toast('Room '+(i+1)+': check-out must be after check-in'); return; }
     if(s.checkin<DB.rules.eventStart || s.checkin>=DB.rules.eventEnd || s.checkout>DB.rules.eventEnd){ toast('Check-in must be between '+fmtD(DB.rules.eventStart)+' and '+fmtD(prevDay(DB.rules.eventEnd))+', and check-out by '+fmtD(DB.rules.eventEnd)); return; } }
   const rooms=Math.max(1,parseInt($('#reqRooms').value)||1);
-  const data={head:head,phone:phoneDigits,guestType:guestType,accompanying:total-1,count:total,family:total>1,preferred:pref,
+  let extraRoomPayer='';
+  if(guestType==='FR' && donationAmt>0 && rooms>guaranteedRooms(donationAmt)){
+    extraRoomPayer=(($('#reqExtraRoomPayer')||{}).value||'');
+    if(!extraRoomPayer){ toast('Please select who will collect the extra-room amount'); return; }
+  }
+  const data={head:head,phone:phoneDigits,guestType:guestType,accompanying:total-1,count:total,family:total>1,preferred:pref,extraRoomPayer:extraRoomPayer,
     donation:Number($('#reqDonation').value)||0,receipt:receipt,
     extraRequested:stays.filter(s=>s.extra).length,
     roomsRequested:rooms,
@@ -1354,11 +1379,12 @@ function guestCell(b,withSug){
            <button class="btn sm" style="padding:2px 9px;margin-left:4px" onclick="applySuggestion('${b.id}','${s.label.toLowerCase()}')">Apply</button></div>`).join('')
       : `<div class="rooms-mini" style="margin-top:5px;color:var(--red)">💡 No eligible hotel with free rooms (check donation/min or availability)</div>`; }
   const reqRoomsTxt=b.roomsRequested>0?` · 🚪 ${b.roomsRequested} separate room(s) requested`:'';
+  const extraRoomTxt=b.extraRoomPayer?` · 💰 extra room collected by ${b.extraRoomPayer==='staff'?'Staff':'Devotee'}`:'';
   const dates=stayLabel(b);
   const catTag = (b.guestType&&b.guestType!=='FR') ? ' <span class="pill p-waitlist">'+esc(b.guestType)+'</span>' : ' '+catBadge(b);
   const fullTag = (b.bookedWhenFull && !b.hotel && b.status!=='confirmed') ? ' <span class="pill p-waitlist" title="Booked while all rooms were full">🕓 waitlist</span>' : '';
   return `<b>${headLabel(b)}</b>${catTag}${fullTag} ${donFestBadge(b)}${raTierTag(b)}${editedTag(b)}${b.receiptWrong?' <span class="pill p-rejected">✗ receipt wrong</span>':''}<div class="muted">requested by ${esc(devoteeName(b))}${b.phone?` · 📱 ${esc(b.phone)}`:''}</div>
-      <div class="muted">${peopleLabel(b)}${b.family?' · 👪 family':''}${b.extraRequested>0?` · 🛏️ ${b.extraRequested} extra bed requested`:''}${reqRoomsTxt}</div>${raTierNote(b)}
+      <div class="muted">${peopleLabel(b)}${b.family?' · 👪 family':''}${b.extraRequested>0?` · 🛏️ ${b.extraRequested} extra bed requested`:''}${reqRoomsTxt}${extraRoomTxt}</div>${raTierNote(b)}
       ${dateEditHTML(b)}
       ${b.note?`<div class="muted" style="background:#fff4e4;border-radius:6px;padding:4px 8px;margin-top:4px">📝 ${esc(b.note)}</div>`:''}${sugHTML}`;
 }
@@ -1582,14 +1608,9 @@ function setSevaChannel(id,v){ const b=DB.bookings.find(x=>x.id===id); if(!b)ret
    even while the actual room/location is still being allocated. Location appears only after allocation. */
 /* How many rooms a donation guarantees (rest depend on availability):
    ₹11L+ → 3 · ₹5L+ → 2 · ₹2.5L+/₹1L+/₹50k+ → 1 · below ₹50k → 0 (no guarantee). */
-function guaranteedRooms(donation){
-  const r=DB.rules, d=Number(donation)||0;
-  if(d>=(r.h1Min||2500000)) return 5;   // H1
-  if(d>=(r.h2Min||1100000)) return 3;   // H2
-  if(d>=(r.h3Min||500000)) return 2;    // H3
-  if(d>=(r.freeMin||50000)) return 1;   // H4 / D2 (free-stay floor and up)
-  return 0;                             // D3
-}
+const DEFAULT_ROOM_LIMITS={H1:5,H2:3,H3:2,H4:1,D2:1,D3:0};
+function roomLimitFor(cat){ const m=(DB.rules&&DB.rules.roomLimits)||{}; const v=m[cat]; return (v!=null&&v!=='')?Number(v):(DEFAULT_ROOM_LIMITS[cat]||0); }
+function guaranteedRooms(donation){ return roomLimitFor(computeCat(donation)); }
 /* Devotee-facing status text based on donation tier and rooms requested. */
 function guaranteeNote(b){
   const R=Math.max(1, b.roomsRequested||1), G=guaranteedRooms(b.donation);
@@ -1978,7 +1999,7 @@ function exportKindDonors(){ if(typeof XLSX==='undefined'){ toast('Excel library
     'Total People':b.count, 'Donation (₹)':b.donation||0, 'Amount Given':((b.donation||0)>0?'Yes':'No'),
     'Guest Type':b.guestType||'FR', 'Status':b.status,
     'Hotel':b.hotel?hotelName(b.hotel):'', 'Room Type':b.roomType||'', 'Rooms':b.rooms||0,
-    'Separate Rooms Requested':b.roomsRequested||0,
+    'Separate Rooms Requested':b.roomsRequested||0, 'Extra Room Collected By':b.extraRoomPayer==='staff'?'Staff':(b.extraRoomPayer==='devotee'?'Devotee':''),
     'Check-in':b.checkin||'', 'Check-out':b.checkout||'', 'Note':b.note||'' }));
   if(!rows.length){ toast('No kind donors yet'); return; }
   const wb=XLSX.utils.book_new();
@@ -2215,6 +2236,7 @@ function viewSevaCollect(){
 /* ---------------- Super Admin: Settings (rules) ---------------- */
 function setRule(f,v){ DB.rules[f]=Math.max(0,parseInt(v)||0); syncHotelMinFromRules(); const c=recalcPending(); save(); render();
   toast('Rules updated — pending requests recalculated'+(c?` (${c} reset)`:'')); }
+function setRoomLimit(cat,v){ if(!DB.rules.roomLimits) DB.rules.roomLimits={}; DB.rules.roomLimits[cat]=Math.max(0,parseInt(v)||0); const c=recalcPending(); save(); render(); toast('Room limit updated'+(c?` (${c} recalculated)`:'')); }
 function setEventDate(f,v){ if(!v) return; DB.rules[f]=v; save(); render(); toast('Festival booking window updated'); }
 function toggleCatHotel(cat,hid){ ensureTiers(); const map=DB.rules.categoryHotels; if(!map[cat])map[cat]=catHotelsFor(cat).slice();
   const i=map[cat].indexOf(hid); if(i>=0)map[cat].splice(i,1); else map[cat].push(hid);
@@ -2226,6 +2248,7 @@ function toggleTypeHotel(gt,hid){ ensureTiers(); const map=DB.rules.guestTypeHot
   toast(gt+' guests → hotel mapping updated'+(c?` (${c} reset)`:'')); }
 function viewSettings(){
   const r=DB.rules, inr=n=>'₹'+Number(n||0).toLocaleString('en-IN');
+  const rl=(k,d)=>{const m=r.roomLimits||{};return (m[k]!=null&&m[k]!=='')?m[k]:d;};
   const h1=r.h1Min||2500000, h2=r.h2Min||1100000, h3=r.h3Min||500000;
   const hotelCheck=(cat)=>DB.hotels.map(h=>`<label style="display:flex;gap:7px;align-items:center;margin:4px 0;font-weight:500">
       <input type="checkbox" style="width:auto" ${catHotelsFor(cat).includes(h.id)?'checked':''} onchange="toggleCatHotel('${cat}','${h.id}')"> ${esc(h.name)}${h.manualOnly?' <span class="muted" style="font-size:11px">(manual only)</span>':''}${h.volunteerOnly?' <span class="muted" style="font-size:11px">(volunteers)</span>':''}</label>`).join('');
@@ -2259,8 +2282,18 @@ function viewSettings(){
       <div><label>Free-stay minimum (₹)</label><input type="number" min="0" value="${r.freeMin}" onchange="setRule('freeMin',this.value)"></div>
     </div>
     <p class="muted" style="margin-top:8px">H1 ≥ ${inr(h1)} &nbsp;·&nbsp; H2 = ${inr(h2)} to below ${inr(h1)} &nbsp;·&nbsp; H3 = ${inr(h3)} to below ${inr(h2)} &nbsp;·&nbsp; H4 = ${inr(r.d1Min)} to below ${inr(h3)} &nbsp;·&nbsp; D2 = ${inr(r.d2Min)} to below ${inr(r.d1Min)} &nbsp;·&nbsp; D3 = below ${inr(r.d2Min)} &nbsp;·&nbsp; Free stay ≥ ${inr(r.freeMin)}</p>
-    <p class="muted" style="margin-top:4px">H1–H4 are top tier (Braj Nidhi guaranteed). Room guarantee: H1 → 5 · H2 → 3 · H3 → 2 · H4/D2 → 1 · D3 → 0.</p>
+    <p class="muted" style="margin-top:4px">H1–H4 are top tier (Braj Nidhi guaranteed). Rooms allowed per category are set below.</p>
     </div>
+    <div class="card"><h2 class="section" style="margin:0 0 4px">🚪 Rooms allowed per category</h2>
+    <p class="subhead">Max rooms a donor of each category may take. If a devotee requests more than this, they must say who will collect the extra-room amount (devotee or staff). Same limits apply for Radha Ashtami.</p>
+    <div class="grid g3">
+      <div><label>H1 — rooms allowed</label><input type="number" min="0" value="${rl('H1',5)}" onchange="setRoomLimit('H1',this.value)"></div>
+      <div><label>H2 — rooms allowed</label><input type="number" min="0" value="${rl('H2',3)}" onchange="setRoomLimit('H2',this.value)"></div>
+      <div><label>H3 — rooms allowed</label><input type="number" min="0" value="${rl('H3',2)}" onchange="setRoomLimit('H3',this.value)"></div>
+      <div><label>H4 — rooms allowed</label><input type="number" min="0" value="${rl('H4',1)}" onchange="setRoomLimit('H4',this.value)"></div>
+      <div><label>D2 — rooms allowed</label><input type="number" min="0" value="${rl('D2',1)}" onchange="setRoomLimit('D2',this.value)"></div>
+      <div><label>D3 — rooms allowed</label><input type="number" min="0" value="${rl('D3',0)}" onchange="setRoomLimit('D3',this.value)"></div>
+    </div></div>
 <div class="card"><h2 class="section" style="margin:0 0 4px">🏨 Which hotel does each type get? — donation category</h2>
     <p class="subhead">Tick the guest house(s) suggested for each donation category. Leave a category blank to fall back to the default (any hotel the donation qualifies for). Feeds the auto-suggestion.</p>
     <div class="grid g3">
