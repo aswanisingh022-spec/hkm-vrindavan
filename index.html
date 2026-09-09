@@ -395,7 +395,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b94';
+const APP_BUILD='2026-08-16-b95';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -1353,14 +1353,24 @@ function guestCell(b,withSug){
   const dates=stayLabel(b);
   const catTag = (b.guestType&&b.guestType!=='FR') ? ' <span class="pill p-waitlist">'+esc(b.guestType)+'</span>' : ' '+catBadge(b);
   const fullTag = (b.bookedWhenFull && !b.hotel && b.status!=='confirmed') ? ' <span class="pill p-waitlist" title="Booked while all rooms were full">🕓 waitlist</span>' : '';
-  return `<b>${headLabel(b)}</b>${catTag}${fullTag} ${donFestBadge(b)}${editedTag(b)}${b.receiptWrong?' <span class="pill p-rejected">✗ receipt wrong</span>':''}<div class="muted">requested by ${esc(devoteeName(b))}${b.phone?` · 📱 ${esc(b.phone)}`:''}</div>
-      <div class="muted">${peopleLabel(b)}${b.family?' · 👪 family':''}${b.extraRequested>0?` · 🛏️ ${b.extraRequested} extra bed requested`:''}${reqRoomsTxt}</div>
+  return `<b>${headLabel(b)}</b>${catTag}${fullTag} ${donFestBadge(b)}${raTierTag(b)}${editedTag(b)}${b.receiptWrong?' <span class="pill p-rejected">✗ receipt wrong</span>':''}<div class="muted">requested by ${esc(devoteeName(b))}${b.phone?` · 📱 ${esc(b.phone)}`:''}</div>
+      <div class="muted">${peopleLabel(b)}${b.family?' · 👪 family':''}${b.extraRequested>0?` · 🛏️ ${b.extraRequested} extra bed requested`:''}${reqRoomsTxt}</div>${raTierNote(b)}
       ${dateEditHTML(b)}
       ${b.note?`<div class="muted" style="background:#fff4e4;border-radius:6px;padding:4px 8px;margin-top:4px">📝 ${esc(b.note)}</div>`:''}${sugHTML}`;
 }
 
 /* ---------------- Admin: New Requests (not yet confirmed) ---------------- */
-function reqSortVal(b){ const gt=b.guestType||'FR'; return (gt==='PR'||gt==='Media')?Infinity:(b.donation||0); }  // PR/Media on top, then by donation
+/* Radha Ashtami allocation priority (guidance for the coordinator): tier by occasion + donation amount.
+   P1 = Radha Ashtami donor ≥₹50K · P2 = Janmashtami ≥₹2.5L · P3 = Janmashtami ₹1L–2.5L · P4 = Radha Ashtami ₹21K–50K. */
+function raTier(b){ const amt=Number(b.donation)||0, fest=(b.donFest==='RA')?'RA':'JM'; if((b.guestType||'FR')!=='FR') return null;
+  if(fest==='RA' && amt>=50000) return {n:1,cat:'Radha Ashtami ₹50K+',alloc:'1 room · 1 day',charge:'Extra room or day will be charged'};
+  if(fest==='JM' && amt>=250000) return {n:2,cat:'JNM ₹2.5L',alloc:'1 room · 1 day',charge:'Anything extra will be charged'};
+  if(fest==='JM' && amt>=100000) return {n:3,cat:'JNM ₹1L',alloc:'As per availability',charge:'Room will be charged'};
+  if(fest==='RA' && amt>=21000) return {n:4,cat:'RA ₹21K',alloc:'As per availability',charge:'Room will be charged'};
+  return null; }
+function raTierTag(b){ const t=raTier(b); return t?` <span class="pill p-confirmed" title="${t.cat} — ${t.alloc} — ${t.charge}">P${t.n}</span>`:''; }
+function raTierNote(b){ const t=raTier(b); return t?`<div class="rooms-mini" style="margin-top:3px;color:#6c5ce7">🏅 <b>Priority ${t.n}</b> · ${t.cat} · Allocation: ${t.alloc} · ${t.charge}</div>`:''; }
+function reqSortVal(b){ const gt=b.guestType||'FR'; if(gt==='PR'||gt==='Media') return Infinity; const t=raTier(b); if(t) return (5-t.n)*1e12+(b.donation||0); return (b.donation||0); }  // PR/Media top, then priority tier P1→P4, then donation
 let reqSort='priority', bookedSort='priority';
 function setReqSort(v){ reqSort=v; render(); }
 /* Requests filter — by receipt approval or donation band (VCM sees the category floor; Super Admin the exact amount). */
