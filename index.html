@@ -395,7 +395,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b95';
+const APP_BUILD='2026-08-16-b96';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -1927,10 +1927,11 @@ function viewVacancy(){
 }
 
 /* ---------------- Admin: Excel Export ---------------- */
-function bookingRow(b){ return {
+function bookingRow(b){ const t=raTier(b); const loc=b.hotel?hotelsTextForBooking(b):'Not allocated'; return {
   'Head of Family':b.head||'', 'Guest Mobile':b.phone||'', 'Accompanying':b.accompanying!==undefined?b.accompanying:'',
   'Total People':b.count, 'Devotee':devoteeName(b), 'Donation (₹)':b.donation||0,
-  'Guest Type':b.guestType||'FR', 'Receipt No':b.receipt||'', 'Receipt Verified':b.receiptWrong?'Wrong':(b.donationVerified?'Yes':'No'), 'Seva Received By':b.sevaChannel?sevaChannelLabel(b).replace(/<[^>]+>/g,''):'', 'Seva Date':b.sevaDate||'', 'Accommodation':b.donation>=DB.rules.freeMin?'Free':(b.sevaCollected?'Seva collected':'Seva pending'), 'Status':b.status, 'Hotel':b.hotel?hotelName(b.hotel):'',
+  'Category':computeCat(b.donation), 'Occasion':donFestLabel(b), 'Priority (RA policy)':t?('P'+t.n+' · '+t.cat):'',
+  'Guest Type':b.guestType||'FR', 'Receipt No':b.receipt||'', 'Receipt Verified':b.receiptWrong?'Wrong':(b.donationVerified?'Yes':'No'), 'Seva Received By':b.sevaChannel?sevaChannelLabel(b).replace(/<[^>]+>/g,''):'', 'Seva Date':b.sevaDate||'', 'Accommodation':b.donation>=DB.rules.freeMin?'Free':(b.sevaCollected?'Seva collected':'Seva pending'), 'Status':b.status, 'Hotel':b.hotel?hotelName(b.hotel):'', 'Location (allocated)':loc,
   'Room Type':b.roomType||'', 'Rooms':b.rooms||0,
   'Extra Bed Requested':b.extraRequested||0, 'Extra Bed Given':b.extraBeds||0,
   'Separate Rooms Requested':b.roomsRequested||0,
@@ -1974,8 +1975,8 @@ function viewExports(){
   return `<div class="card"><h2 class="section">📥 Download Lists as Excel</h2>
     <p class="subhead">Each download opens directly in Microsoft Excel / Google Sheets.</p>
     <div class="grid g2">
-      <div class="stat"><b>Full list</b><p class="muted" style="margin:6px 0 10px">Every booking in one sheet.</p>
-        <button class="btn" onclick="exportFull()">Download full list</button></div>
+      <div class="stat"><b>📋 ALL entries (complete)</b><p class="muted" style="margin:6px 0 10px">Every request in one sheet — devotee, donation, category, occasion, priority, receipt verification status, hotel + room location, no. of rooms given, dates, status &amp; more.</p>
+        <button class="btn" onclick="exportFull()">Download ALL entries</button></div>
       <div class="stat"><b>Hotel-wise</b><p class="muted" style="margin:6px 0 10px">One sheet per hotel + unassigned.</p>
         <button class="btn" onclick="exportByHotel()">Download by hotel</button></div>
       <div class="stat"><b>Devotee-wise</b><p class="muted" style="margin:6px 0 10px">One sheet per Devotee.</p>
