@@ -395,7 +395,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b100';
+const APP_BUILD='2026-08-16-b101';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -927,12 +927,12 @@ function viewNewReq(){
       <div><label>Donation amount (₹)</label><input id="reqDonation" type="number" min="0" placeholder="0" oninput="syncSevaPlan()" onchange="syncSevaPlan()"></div>
     </div>
     <div><label>Donation receipt number <span id="rcpStar" style="color:var(--red)">*</span></label><input id="reqReceipt" placeholder="Enter donation receipt number" oninput="checkReceipt()" onblur="checkReceipt()"><p id="rcpMsg" class="rooms-mini" style="margin:4px 0 0;color:var(--red);display:none">⚠ Please enter a correct receipt number</p></div>
-    <div style="margin-top:10px"><label>This donation was made for</label>
-      <select id="reqDonFest">
-        <option value="JM">Janmashtami</option>
-        <option value="RA">Radha Ashtami</option>
-      </select>
-      <div class="rooms-mini">Please mark whether this donation was for Janmashtami or Radha Ashtami.</div></div>
+    <div id="donFestWrap" style="margin-top:10px"><label>This donation was made for <span style="color:var(--red)">*</span></label>
+      <div class="flex" style="gap:12px;flex-wrap:wrap;margin-top:4px">
+        <label style="display:flex;gap:8px;align-items:center;font-weight:600;background:#fff4e4;border:1px solid var(--line);border-radius:9px;padding:9px 14px;cursor:pointer"><input type="checkbox" class="donFestBox" value="JM" style="width:auto;accent-color:var(--saffron-dark)" onchange="pickDonFest('JM')"> Janmashtami</label>
+        <label style="display:flex;gap:8px;align-items:center;font-weight:600;background:#fff4e4;border:1px solid var(--line);border-radius:9px;padding:9px 14px;cursor:pointer"><input type="checkbox" class="donFestBox" value="RA" style="width:auto;accent-color:var(--saffron-dark)" onchange="pickDonFest('RA')"> Radha Ashtami</label>
+      </div>
+      <div class="rooms-mini">Please tick whether this donation was for Janmashtami or Radha Ashtami. Ticking one is required.</div></div>
     <p class="rooms-mini" id="typeNote" style="margin:4px 0 0">FR Guest — donation receipt number is required.</p>
     <div id="sevaPlanWrap" style="margin-top:10px;background:#f6efe2;border:1px dashed var(--line);border-radius:10px;padding:10px 14px">
       <label style="margin-top:0">💰 Who will collect the room seva / payment?</label>
@@ -958,7 +958,7 @@ function cancelEdit(){ editingId=null; go('myreq'); }
 function prefillEdit(){ if(!editingId) return; const b=DB.bookings.find(x=>x.id===editingId); if(!b){ editingId=null; return; }
   const set=(id,v)=>{ const e=$(id); if(e) e.value=v; };
   set('#reqHead',b.head||''); set('#reqPhone',b.phone||''); set('#reqType',b.guestType||'FR'); updateTypeUI(); set('#reqTotal',b.count||1); updateSummary();
-  set('#reqDonation',b.donation||''); set('#reqReceipt',b.receipt||''); set('#reqDonFest',b.donFest||'JM');
+  set('#reqDonation',b.donation||''); set('#reqReceipt',b.receipt||''); { const df=b.donFest==='RA'?'RA':(b.donFest==='JM'?'JM':''); document.querySelectorAll('.donFestBox').forEach(c=>c.checked=(!!df&&c.value===df)); }
   set('#reqRooms',b.roomsRequested||1); set('#reqSevaPlan',b.sevaPlan||'devotee'); { const sp=$('#reqSevaPlan'); if(sp) sp.dataset.userTouched='1'; }
   (b.preferred||[]).forEach(pid=>{ const c=document.querySelector('.prefHotel[value="'+pid+'"]'); if(c) c.checked=true; });
   renderDateRows();
@@ -976,9 +976,11 @@ function reqStep(id,delta){ const e=document.getElementById(id); if(!e)return;
 function reqStepChanged(id){ if(id==='reqTotal') updateSummary(); if(id==='reqRooms') renderDateRows(); }
 function updateSummary(){ const te=$('#reqTotal'); if(!te) return;
   const p=$('#sumPeople'); if(p) p.textContent=Math.max(1,parseInt(te.value)||1); }
-function updateTypeUI(){ const t=($('#reqType')||{}).value||'FR'; const note=$('#typeNote'), star=$('#rcpStar');
+function updateTypeUI(){ const t=($('#reqType')||{}).value||'FR'; const note=$('#typeNote'), star=$('#rcpStar'); const dfw=$('#donFestWrap'); if(dfw) dfw.style.display=(t==='FR')?'':'none';
   if(t==='FR'){ if(note)note.textContent='FR Guest — donation receipt number is required.'; if(star)star.style.display=''; }
   else { if(note)note.textContent=t+' guest — no receipt needed. You may leave donation and receipt blank.'; if(star)star.style.display='none'; } }
+function pickDonFest(val){ const boxes=[...document.querySelectorAll('.donFestBox')]; const c=boxes.find(x=>x.value===val); if(c&&c.checked){ boxes.forEach(x=>{ if(x.value!==val) x.checked=false; }); } }
+function getDonFest(){ const c=[...document.querySelectorAll('.donFestBox')].find(x=>x.checked); return c?c.value:''; }
 function renderDateRows(){ const c=$('#dateRows'); if(!c) return;
   const n=Math.max(1, parseInt(($('#reqRooms')||{}).value)||1);
   // preserve existing values across re-render
@@ -1055,6 +1057,7 @@ function submitReq(){
   const isKindDonor=(($('#reqSevaPlan')||{}).value)==='kind';
   if(guestType==='FR' && !receipt && !isKindDonor){ toast('Donation receipt number is required for an FR Guest'); return; }
   if(receipt && !isKindDonor){ const rClean=receipt.replace(/\s+/g,'').toUpperCase(); if(!/^(HKMV|VCMT).+/.test(rClean)){ toast('Invalid receipt number — please enter the correct number'); return; } }
+  if(guestType==='FR' && !getDonFest()){ toast('Please tick whether this donation was for Janmashtami or Radha Ashtami'); return; }
   const phoneDigits=($('#reqPhone').value||'').replace(/\D/g,'');
   if(phoneDigits && phoneDigits.length!==10){ toast('Guest mobile number must be exactly 10 digits'); return; }
   if(receipt){ const rNorm=receipt.toLowerCase(); const dup=DB.bookings.find(x=>x.id!==editingId && x.status!=='cancelled' && x.status!=='withdrawn' && (x.receipt||'').trim().toLowerCase()===rNorm);
@@ -1077,7 +1080,7 @@ function submitReq(){
     extraRequested:stays.filter(s=>s.extra).length,
     roomsRequested:rooms,
     sevaPlan:(($('#reqSevaPlan')||{}).value||'devotee'),
-    donFest:(($('#reqDonFest')||{}).value||'JM'),
+    donFest:getDonFest(),
     stays:stays, checkin:stays[0].checkin, checkout:stays[0].checkout,
     note:$('#reqNote').value.trim()};
   if(editingId){ const b=DB.bookings.find(x=>x.id===editingId);
