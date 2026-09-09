@@ -307,7 +307,7 @@ function seed(){
     rules:{ d1Min:250000, d2Min:2000, freeMin:50000, h1Min:2500000, h2Min:1100000, h3Min:500000, eventStart:'2026-09-01', eventEnd:'2026-09-10', categoryHotels:{ D1:['h1','h2'], D2:['h3'], D3:['h4'] }, guestTypeHotels:{ PR:['h1'], Media:['h1'], Volunteer:['h4'] } }
   };
 }
-const DEFAULT_RULES={ d1Min:250000, d2Min:2000, freeMin:50000, h1Min:2500000, h2Min:1100000, h3Min:500000, eventStart:'2026-09-01', eventEnd:'2026-09-10', roomLimits:{H1:5,H2:3,H3:2,H4:1,D2:1,D3:0}, categoryHotels:{ D1:['h1','h2'], D2:['h3'], D3:['h4'] }, guestTypeHotels:{ PR:['h1'], Media:['h1'], Volunteer:['h4'] } };
+const DEFAULT_RULES={ d1Min:250000, d2Min:2000, freeMin:50000, jmFreeMin:250000, jmConfirmMin:100000, h1Min:2500000, h2Min:1100000, h3Min:500000, eventStart:'2026-09-01', eventEnd:'2026-09-10', roomLimits:{H1:5,H2:3,H3:2,H4:1,D2:1,D3:0}, categoryHotels:{ D1:['h1','h2'], D2:['h3'], D3:['h4'] }, guestTypeHotels:{ PR:['h1'], Media:['h1'], Volunteer:['h4'] } };
 function defaultDB(){ return { hotels:[], bookings:[], notifications:[], rules:JSON.parse(JSON.stringify(DEFAULT_RULES)), assign:{}, loginList:[], creds:{} }; }
 let DB = defaultDB();
 let _saveTimer=null;
@@ -319,9 +319,12 @@ function catFloor(cat){ const r=DB.rules; return cat==='H1'?(r.h1Min||2500000):c
 function computeCat(amt){ const r=DB.rules, d=Number(amt)||0; const h1=r.h1Min||2500000, h2=r.h2Min||1100000, h3=r.h3Min||500000; return d>=h1?'H1':d>=h2?'H2':d>=h3?'H3':d>=r.d1Min?'H4':d>=r.d2Min?'D2':'D3'; }
 function isTopCat(c){ return c==='H1'||c==='H2'||c==='H3'||c==='H4'; }   // all get Braj Nidhi
 function bookingData(b){ const d=Object.assign({},b); delete d.donation; delete d.receipt; delete d.donationVerified; delete d.receiptWrong; delete d.devId; d.donationCategory=computeCat(b.donation);
-  d.freeStay = (USER && USER.role==='vcm') ? !!b.freeStay : ((Number(b.donation)||0) >= DB.rules.freeMin);  // ₹50k+ = free stay; set by whoever has the real amount, preserved by VCM
+  d.freeStay = (USER && USER.role==='vcm') ? !!b.freeStay : ((Number(b.donation)||0) >= freeStayThreshold(b));  // occasion-aware: RA ≥₹50k · JM ≥₹2.5L; preserved by VCM
   return d; }
-function isFreeStay(b){ return (b.freeStay!==undefined) ? !!b.freeStay : ((b.donation||0) >= DB.rules.freeMin); }
+function freeStayThreshold(b){ return (b.donFest==='RA') ? (Number(DB.rules.freeMin)||50000) : (Number(DB.rules.jmFreeMin)||250000); }   // free room: RA ≥₹50k · JM ≥₹2.5L
+function autoConfirmThreshold(b){ return (b.donFest==='RA') ? (Number(DB.rules.freeMin)||50000) : (Number(DB.rules.jmConfirmMin)||100000); }   // assured/Confirmed: RA ≥₹50k (priority) · JM ≥₹1L
+function isFreeStay(b){ return (b.freeStay!==undefined) ? !!b.freeStay : ((Number(b.donation)||0) >= freeStayThreshold(b)); }
+function isAutoConfirm(b){ return (Number(b.donation)||0) >= autoConfirmThreshold(b); }
 async function loadFromCloud(){
   const role=USER.role;
   const isAdmin=role==='admin', wantAmounts=(role==='admin'||role==='brahmachari'), wantNotifs=(role==='admin'||role==='vcm');
@@ -395,7 +398,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b105';
+const APP_BUILD='2026-08-16-b106';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -944,7 +947,7 @@ function viewNewReq(){
       </select>
       <p class="rooms-mini" id="sevaPlanNote" style="margin:4px 0 0">Donation ₹50,000 or above → <b>FOC (free of cost)</b> is auto-selected; you may change it. Below ₹50,000 → FOC is not available; choose Devotee or Staff. This shows up for Staff, VCM Guest House and Super Admin.</p></div>
     <div id="extraRoomWrap" style="margin-top:10px;background:#fdecec;border:1px solid #f3c2c2;border-radius:10px;padding:10px 14px;display:none">
-      <label style="margin-top:0;color:var(--red)">🚪 You asked for more rooms than your category allows — who will collect the extra-room amount? <span style="color:var(--red)">*</span></label>
+      <label style="margin-top:0;color:var(--red)">🚪 Only 1 room is free — who will collect the amount for the extra (paid) room(s)? <span style="color:var(--red)">*</span></label>
       <select id="reqExtraRoomPayer">
         <option value="">— select —</option>
         <option value="devotee">Devotee will arrange / collect the extra-room amount</option>
@@ -1037,8 +1040,9 @@ function checkReceipt(){
 function syncSevaPlan(){
   const sel=$('#reqSevaPlan'); if(!sel) return;
   const amt=Math.max(0, Number(($('#reqDonation')||{}).value)||0);
-  const freeMin=Number(DB.rules.freeMin)||50000;
-  const eligible = amt>=freeMin;
+  const fest=(typeof getDonFest==='function'?getDonFest():'')||'JM';
+  const thr = fest==='RA' ? (Number(DB.rules.freeMin)||50000) : (Number(DB.rules.jmFreeMin)||250000);
+  const eligible = amt>=thr;
   const foc=sel.querySelector('option[value="foc"]');
   if(foc) foc.disabled=!eligible;
   if(eligible){
@@ -1048,18 +1052,20 @@ function syncSevaPlan(){
   }
   const note=$('#sevaPlanNote');
   if(note){ note.innerHTML = eligible
-    ? 'Donation is ₹50,000 or above → eligible for <b>FOC (free of cost)</b>. It is auto-selected; you may switch to Devotee or Staff if you prefer.'
-    : 'Donation is below ₹50,000 → <b>FOC is not available</b>. Please choose Devotee or Staff to collect the seva.'; }
+    ? 'This donation qualifies for free accommodation → <b>FOC (free of cost)</b> is auto-selected; you may switch to Devotee or Staff if you prefer.'
+    : 'This donation does not qualify for free accommodation → <b>FOC is not available</b>. Please choose Devotee or Staff to collect the seva.'; }
 }
 function updateExtraRoomUI(){ const wrap=$('#extraRoomWrap'); if(!wrap) return;
   const gt=($('#reqType')||{}).value||'FR';
   const amt=Math.max(0,Number(($('#reqDonation')||{}).value)||0);
   const rooms=Math.max(1,parseInt(($('#reqRooms')||{}).value)||1);
-  const limit=guaranteedRooms(amt);
-  const show = gt==='FR' && amt>0 && rooms>limit;
+  const fest=(typeof getDonFest==='function'?getDonFest():'')||'JM';
+  const thr=fest==='RA'?(Number(DB.rules.freeMin)||50000):(Number(DB.rules.jmFreeMin)||250000);
+  const freeRooms = amt>=thr ? 1 : 0;
+  const show = gt==='FR' && amt>0 && freeRooms>=1 && rooms>freeRooms;
   wrap.style.display = show ? '' : 'none';
   const note=$('#extraRoomNote');
-  if(show && note){ const extra=rooms-limit; note.textContent = `Your category allows ${limit} room${limit===1?'':'s'} — the other ${extra} room${extra===1?'':'s'} will be on a paid basis.`; }
+  if(show && note){ const extra=rooms-freeRooms; note.textContent = `1 room is free — the other ${extra} room${extra===1?'':'s'} ${extra===1?'is':'are'} on a paid basis.`; }
 }
 function toggleSame(i){
   const ci0=document.querySelector('.ci[data-i="0"]').value, co0=document.querySelector('.co[data-i="0"]').value;
@@ -1084,8 +1090,9 @@ function submitReq(){
     if(dup){ showNotice('Receipt already used', `A request has already been submitted using receipt number <b>${esc(receipt)}</b>${dup.head?` (for <b>${esc(dup.head)}</b>)`:''}.<br><br>Each donation receipt can be used for only one booking request. Please check your existing requests, or use the correct receipt number.`, '⚠'); return; } }
   const donationAmt=Math.max(0, Number($('#reqDonation').value)||0);
   const sevaPlanVal=(($('#reqSevaPlan')||{}).value||'devotee');
-  const freeMinVal=Number(DB.rules.freeMin)||50000;
-  if(sevaPlanVal==='foc' && donationAmt<freeMinVal){ toast('FOC (free of cost) is only for donations of ₹'+freeMinVal.toLocaleString('en-IN')+' or above. Please choose Devotee or Staff.'); return; }
+  const focOcc=(($('#reqDonFest')?getDonFest():'')||'JM');
+  const freeMinVal = focOcc==='RA' ? (Number(DB.rules.freeMin)||50000) : (Number(DB.rules.jmFreeMin)||250000);
+  if(sevaPlanVal==='foc' && donationAmt<freeMinVal){ toast('FOC (free of cost) needs '+(focOcc==='RA'?'Radha Ashtami':'Janmashtami')+' donation of ₹'+freeMinVal.toLocaleString('en-IN')+' or above. Please choose Devotee or Staff.'); return; }
   const pref=[];
   const cis=[...document.querySelectorAll('.ci')], cos=[...document.querySelectorAll('.co')], exs=[...document.querySelectorAll('.exBed')];
   const stays=cis.map((el,idx)=>({checkin:el.value, checkout:(cos[idx]||{}).value||'', extra:!!(exs[idx]&&exs[idx].checked)}));
@@ -1096,10 +1103,11 @@ function submitReq(){
     if(s.checkin<DB.rules.eventStart || s.checkin>=DB.rules.eventEnd || s.checkout>DB.rules.eventEnd){ toast('Check-in must be between '+fmtD(DB.rules.eventStart)+' and '+fmtD(prevDay(DB.rules.eventEnd))+', and check-out by '+fmtD(DB.rules.eventEnd)); return; } }
   const rooms=Math.max(1,parseInt($('#reqRooms').value)||1);
   let extraRoomPayer='';
-  if(guestType==='FR' && donationAmt>0 && rooms>guaranteedRooms(donationAmt)){
-    extraRoomPayer=(($('#reqExtraRoomPayer')||{}).value||'');
-    if(!extraRoomPayer){ toast('Please select who will collect the extra-room amount'); return; }
-  }
+  { const fest=(($('#reqDonFest')?getDonFest():'')||'JM'); const thr=fest==='RA'?(Number(DB.rules.freeMin)||50000):(Number(DB.rules.jmFreeMin)||250000); const freeRooms=donationAmt>=thr?1:0;
+    if(guestType==='FR' && freeRooms>=1 && rooms>freeRooms){
+      extraRoomPayer=(($('#reqExtraRoomPayer')||{}).value||'');
+      if(!extraRoomPayer){ toast('Please select who will collect the extra-room amount'); return; }
+    } }
   const data={head:head,phone:phoneDigits,guestType:guestType,accompanying:total-1,count:total,family:total>1,preferred:pref,extraRoomPayer:extraRoomPayer,
     donation:Number($('#reqDonation').value)||0,receipt:receipt,
     extraRequested:stays.filter(s=>s.extra).length,
@@ -1206,7 +1214,7 @@ function viewMyReq(){
   return `<div class="card"><h2 class="section">📋 My Requests</h2>
     <p class="subhead">You can Edit a request, Cancel it, or Pull it back (withdraw). Cancelling or pulling back frees the room for others.</p>
     <table class="stack-mobile"><thead><tr><th>Guests</th><th>Dates</th><th>Donation</th><th>Accommodation</th><th>Extra bed</th><th>Status</th><th>Location</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table>
-    <p class="muted" style="margin-top:10px;font-size:12px">💡 Donations of ₹50,000 or above receive free accommodation and your room is <b>assured</b> — Status shows <b>Confirmed</b> right away, and the exact guest house &amp; room (Location) is shared once it is allocated. For smaller donations, an accommodation seva is collected by the coordinator.</p></div>`;
+    <p class="muted" style="margin-top:10px;font-size:12px">💡 <b>Radha Ashtami</b>: donation ₹50,000+ gets a free room and your status shows <b>Confirmed</b> right away (priority). <b>Janmashtami</b>: donation ₹2.5 lakh+ gets a free room; ₹1 lakh+ shows <b>Confirmed</b> right away. Other donations are on a paid basis (an accommodation seva is collected by the devotee or coordinator) and the room is confirmed once allocated. The exact guest house &amp; room (Location) is shared after allocation.</p></div>`;
 }
 
 /* ---------------- Admin: Dashboard ---------------- */
@@ -1327,7 +1335,7 @@ function allocCell(b){
   const gt=b.guestType||'FR';
   let seva;
   if(gt!=='FR'){ seva=`<div class="seva-free">🎫 ${esc(gt)} guest — no room payment required</div>`; }
-  else if(b.donation>=DB.rules.freeMin){ seva=`<div class="seva-free">🙏 Eligible for free accommodation${seeMoney()?` — donation ₹${Number(DB.rules.freeMin).toLocaleString('en-IN')} or above`:''}</div>`; }
+  else if(isFreeStay(b)){ seva=`<div class="seva-free">🙏 Eligible for free accommodation${seeMoney()?` — ${b.donFest==='RA'?'Radha Ashtami':'Janmashtami'} ₹${freeStayThreshold(b).toLocaleString('en-IN')}+`:''}</div>`; }
   else { const selCh = b.sevaChannel || (staffCollects(b) ? 'GPP' : 'Devotee');   // pre-fill from the devotee's own choice on the booking form
     seva=`<div class="seva-collect ${b.sevaCollected?'done':''}">
        <span style="white-space:nowrap;font-weight:700">${b.sevaCollected?'✅ Seva by':'⚠ Seva by'}</span>
@@ -1636,7 +1644,7 @@ function devoteeStatusPill(b){
     : '';
   const note=guaranteeNote(b);
   let core;
-  if(note) core='<span class="pill p-confirmed">Confirmed</span><div class="rooms-mini" style="margin-top:3px">'+note+'</div>';
+  if(isAutoConfirm(b)) core='<span class="pill p-confirmed">Confirmed</span>'+(note?'<div class="rooms-mini" style="margin-top:3px">'+note+'</div>':'');
   else if(b.sevaPlan==='kind') core='<span class="pill p-pending">Pending</span><div class="rooms-mini" style="margin-top:3px">In case of an important guest, contact concerned devotee</div>';
   else core='<span class="pill p-pending">Pending</span>';
   return core + waitNote; }
@@ -2279,7 +2287,9 @@ function viewSettings(){
       <div><label>H3 minimum (₹)</label><input type="number" min="0" value="${h3}" onchange="setRule('h3Min',this.value)"></div>
       <div><label>H4 minimum (₹)</label><input type="number" min="0" value="${r.d1Min}" onchange="setRule('d1Min',this.value)"></div>
       <div><label>D2 minimum (₹)</label><input type="number" min="0" value="${r.d2Min}" onchange="setRule('d2Min',this.value)"></div>
-      <div><label>Free-stay minimum (₹)</label><input type="number" min="0" value="${r.freeMin}" onchange="setRule('freeMin',this.value)"></div>
+      <div><label>Radha Ashtami free-room & confirm min (₹)</label><input type="number" min="0" value="${r.freeMin}" onchange="setRule('freeMin',this.value)"></div>
+      <div><label>Janmashtami free-room min (₹)</label><input type="number" min="0" value="${r.jmFreeMin!=null?r.jmFreeMin:250000}" onchange="setRule('jmFreeMin',this.value)"></div>
+      <div><label>Janmashtami auto-confirm min (₹)</label><input type="number" min="0" value="${r.jmConfirmMin!=null?r.jmConfirmMin:100000}" onchange="setRule('jmConfirmMin',this.value)"></div>
     </div>
     <p class="muted" style="margin-top:8px">H1 ≥ ${inr(h1)} &nbsp;·&nbsp; H2 = ${inr(h2)} to below ${inr(h1)} &nbsp;·&nbsp; H3 = ${inr(h3)} to below ${inr(h2)} &nbsp;·&nbsp; H4 = ${inr(r.d1Min)} to below ${inr(h3)} &nbsp;·&nbsp; D2 = ${inr(r.d2Min)} to below ${inr(r.d1Min)} &nbsp;·&nbsp; D3 = below ${inr(r.d2Min)} &nbsp;·&nbsp; Free stay ≥ ${inr(r.freeMin)}</p>
     <p class="muted" style="margin-top:4px">H1–H4 are top tier (Braj Nidhi guaranteed). Rooms allowed per category are set below.</p>
