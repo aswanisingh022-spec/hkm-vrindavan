@@ -395,7 +395,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b91';
+const APP_BUILD='2026-08-16-b92';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -926,6 +926,12 @@ function viewNewReq(){
       <div><label>Donation amount (₹)</label><input id="reqDonation" type="number" min="0" placeholder="0" oninput="syncSevaPlan()" onchange="syncSevaPlan()"></div>
     </div>
     <div><label>Donation receipt number <span id="rcpStar" style="color:var(--red)">*</span></label><input id="reqReceipt" placeholder="Enter donation receipt number" oninput="checkReceipt()" onblur="checkReceipt()"><p id="rcpMsg" class="rooms-mini" style="margin:4px 0 0;color:var(--red);display:none">⚠ Please enter a correct receipt number</p></div>
+    <div style="margin-top:10px"><label>🎉 This donation was made for</label>
+      <select id="reqDonFest">
+        <option value="JM">Janmashtami</option>
+        <option value="RA">Radha Ashtami</option>
+      </select>
+      <div class="rooms-mini">Please mark whether this donation was for Janmashtami or Radha Ashtami.</div></div>
     <p class="rooms-mini" id="typeNote" style="margin:4px 0 0">FR Guest — donation receipt number is required.</p>
     <div id="sevaPlanWrap" style="margin-top:10px;background:#f6efe2;border:1px dashed var(--line);border-radius:10px;padding:10px 14px">
       <label style="margin-top:0">💰 Who will collect the room seva / payment?</label>
@@ -951,7 +957,7 @@ function cancelEdit(){ editingId=null; go('myreq'); }
 function prefillEdit(){ if(!editingId) return; const b=DB.bookings.find(x=>x.id===editingId); if(!b){ editingId=null; return; }
   const set=(id,v)=>{ const e=$(id); if(e) e.value=v; };
   set('#reqHead',b.head||''); set('#reqPhone',b.phone||''); set('#reqType',b.guestType||'FR'); updateTypeUI(); set('#reqTotal',b.count||1); updateSummary();
-  set('#reqDonation',b.donation||''); set('#reqReceipt',b.receipt||'');
+  set('#reqDonation',b.donation||''); set('#reqReceipt',b.receipt||''); set('#reqDonFest',b.donFest||'JM');
   set('#reqRooms',b.roomsRequested||1); set('#reqSevaPlan',b.sevaPlan||'devotee'); { const sp=$('#reqSevaPlan'); if(sp) sp.dataset.userTouched='1'; }
   (b.preferred||[]).forEach(pid=>{ const c=document.querySelector('.prefHotel[value="'+pid+'"]'); if(c) c.checked=true; });
   renderDateRows();
@@ -1070,6 +1076,7 @@ function submitReq(){
     extraRequested:stays.filter(s=>s.extra).length,
     roomsRequested:rooms,
     sevaPlan:(($('#reqSevaPlan')||{}).value||'devotee'),
+    donFest:(($('#reqDonFest')||{}).value||'JM'),
     stays:stays, checkin:stays[0].checkin, checkout:stays[0].checkout,
     note:$('#reqNote').value.trim()};
   if(editingId){ const b=DB.bookings.find(x=>x.id===editingId);
@@ -1158,7 +1165,7 @@ function viewMyReq(){
          <button class="btn gray sm" onclick="guestCancel('${b.id}')">Cancel</button>
          <button class="btn red sm" onclick="guestWithdraw('${b.id}')">Pull back</button>`;
     return `<tr>
-    <td data-label="Guests">${headLabel(b)}${editedTag(b)}${b.receiptWrong?' <span class="pill p-rejected">⚠ receipt wrong — Edit &amp; give correct number</span>':''}<div class="muted">${peopleLabel(b)}${b.family?' · family':''}</div>${(b.edited && b.editedBy && b.editedBy!==USER.id)?`<div style="margin-top:5px;background:#fdf0dc;border:1px solid #f0d9b0;border-radius:8px;padding:5px 9px;font-size:12px;color:var(--amber)">🔔 Your request was updated by ${esc(b.editedBy)}${b.editedAt?(' on '+fmtDT(b.editedAt)):''}${b.lastEditNote?`<div style="margin-top:2px;color:var(--saffron-dark)">↪ ${esc(b.lastEditNote)}</div>`:''}</div>`:''}</td>
+    <td data-label="Guests">${headLabel(b)} ${donFestBadge(b)}${editedTag(b)}${b.receiptWrong?' <span class="pill p-rejected">⚠ receipt wrong — Edit &amp; give correct number</span>':''}<div class="muted">${peopleLabel(b)}${b.family?' · family':''}</div>${(b.edited && b.editedBy && b.editedBy!==USER.id)?`<div style="margin-top:5px;background:#fdf0dc;border:1px solid #f0d9b0;border-radius:8px;padding:5px 9px;font-size:12px;color:var(--amber)">🔔 Your request was updated by ${esc(b.editedBy)}${b.editedAt?(' on '+fmtDT(b.editedAt)):''}${b.lastEditNote?`<div style="margin-top:2px;color:var(--saffron-dark)">↪ ${esc(b.lastEditNote)}</div>`:''}</div>`:''}</td>
     <td data-label="Dates">${stayLabel(b)||'<span class="muted">—</span>'}${datesChanged(b)?`<div class="rooms-mini" style="margin-top:4px;color:var(--muted)">Originally requested: <s>${origStayLabel(b)}</s></div><div class="rooms-mini" style="margin-top:4px;background:#fdf0dc;border:1px solid #f0d9b0;border-radius:7px;padding:5px 9px;color:var(--amber);font-weight:600">ℹ️ Your request has been modified as per availability of room</div>`:''}</td>
     <td data-label="Donation">${money(b.donation)}</td>
     <td data-label="Accommodation">${sevaLabel(b)}</td>
@@ -1346,7 +1353,7 @@ function guestCell(b,withSug){
   const dates=stayLabel(b);
   const catTag = (b.guestType&&b.guestType!=='FR') ? ' <span class="pill p-waitlist">'+esc(b.guestType)+'</span>' : ' '+catBadge(b);
   const fullTag = (b.bookedWhenFull && !b.hotel && b.status!=='confirmed') ? ' <span class="pill p-waitlist" title="Booked while all rooms were full">🕓 waitlist</span>' : '';
-  return `<b>${headLabel(b)}</b>${catTag}${fullTag}${editedTag(b)}${b.receiptWrong?' <span class="pill p-rejected">✗ receipt wrong</span>':''}<div class="muted">requested by ${esc(devoteeName(b))}${b.phone?` · 📱 ${esc(b.phone)}`:''}</div>
+  return `<b>${headLabel(b)}</b>${catTag}${fullTag} ${donFestBadge(b)}${editedTag(b)}${b.receiptWrong?' <span class="pill p-rejected">✗ receipt wrong</span>':''}<div class="muted">requested by ${esc(devoteeName(b))}${b.phone?` · 📱 ${esc(b.phone)}`:''}</div>
       <div class="muted">${peopleLabel(b)}${b.family?' · 👪 family':''}${b.extraRequested>0?` · 🛏️ ${b.extraRequested} extra bed requested`:''}${reqRoomsTxt}</div>
       ${dateEditHTML(b)}
       ${b.note?`<div class="muted" style="background:#fff4e4;border-radius:6px;padding:4px 8px;margin-top:4px">📝 ${esc(b.note)}</div>`:''}${sugHTML}`;
@@ -1589,6 +1596,13 @@ function devoteeStatusPill(b){
   else if(b.sevaPlan==='kind') core='<span class="pill p-pending">Pending</span><div class="rooms-mini" style="margin-top:3px">In case of an important guest, contact concerned devotee</div>';
   else core='<span class="pill p-pending">Pending</span>';
   return core + waitNote; }
+/* Donation occasion — Janmashtami (JM) / Radha Ashtami (RA). Short forms for tight UI. */
+function donFestShort(b){ return b.donFest==='JM'?'JM':b.donFest==='RA'?'RA':'—'; }
+function donFestLabel(b){ return b.donFest==='JM'?'Janmashtami':b.donFest==='RA'?'Radha Ashtami':'Not set'; }
+function donFestBadge(b){ return `<span class="pill p-waitlist" title="${donFestLabel(b)}">🎉 ${donFestShort(b)}</span>`; }
+/* Super Admin & Accounts can correct the occasion if the receipt shows a discrepancy. */
+function setDonFest(id,val){ if(!(isSuper()||isAccounts())) return; const b=DB.bookings.find(x=>x.id===id); if(!b)return;
+  b.donFest=val; save(); render(); toast('Occasion set to '+donFestLabel(b)); }
 /* accommodation payment status shown to the devotee */
 function sevaLabel(b){
   if((b.guestType||'FR')!=='FR') return `<span class="pill p-confirmed">🎫 ${esc(b.guestType)}</span>`;   // PR / Media / Volunteer: no seva prompt
@@ -2038,6 +2052,9 @@ function viewReceipts(){
       <td>${esc(devoteeName(b))}</td>
       <td>${seeMoney()?money(b.donation):catBadge(b)}</td>
       <td><span class="rcp-copy" onclick="copyReceipt('${b.id}')" title="Click to copy — or select the text">${esc(b.receipt)}</span></td>
+      <td>${(isSuper()||isAccounts())
+          ? `<select onchange="setDonFest('${b.id}',this.value)" style="width:auto;padding:2px 6px;font-size:12px" title="Correct the occasion if the receipt shows a discrepancy"><option value="" ${!b.donFest?'selected':''}>—</option><option value="JM" ${b.donFest==='JM'?'selected':''}>JM (Janmashtami)</option><option value="RA" ${b.donFest==='RA'?'selected':''}>RA (Radha Ashtami)</option></select>`
+          : donFestBadge(b)}</td>
       <td>${b.receiptWrong?'<span class="pill p-rejected">✗ Wrong</span>':(b.donationVerified?'<span class="pill p-confirmed">Verified</span>':'<span class="pill p-pending">Unverified</span>')}</td>
       <td>${!canVerify
           ? `<button class="btn gray sm" disabled style="opacity:.45;cursor:not-allowed" title="Locked by Super Admin">✓ Verify</button>`
@@ -2059,8 +2076,8 @@ function viewReceipts(){
       ${lockBtn}
     </div>
     <input placeholder="🔍 Search by guest name, number or receipt no." value="${esc(searchQ['rcpRows']||'')}" oninput="setSearch('rcpRows',this.value)" style="margin-bottom:12px">
-    <div class="scrollx"><table><thead><tr><th>Guest / Donor</th><th>Devotee</th><th>Donation</th><th>Receipt number</th><th>Status</th><th>Verify</th></tr></thead>
-      <tbody id="rcpRows">${rows||'<tr><td colspan="6" class="muted">Nothing here 🎉</td></tr>'}</tbody></table></div></div>`;
+    <div class="scrollx"><table><thead><tr><th>Guest / Donor</th><th>Devotee</th><th>Donation</th><th>Receipt number</th><th>Occasion</th><th>Status</th><th>Verify</th></tr></thead>
+      <tbody id="rcpRows">${rows||'<tr><td colspan="7" class="muted">Nothing here 🎉</td></tr>'}</tbody></table></div></div>`;
 }
 /* ---------------- Accommodation report (Super Admin + VCM) — no donation amounts ---------------- */
 let reportHotel='all', reportSort='none';
