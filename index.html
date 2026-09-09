@@ -395,7 +395,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b97';
+const APP_BUILD='2026-08-16-b98';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -671,9 +671,10 @@ function buildPlans(b,allowExtra){
   const minRooms=Math.max(1, b.roomsRequested||1);
   const want=allowExtra?Math.max(0,b.extraRequested||0):0;   // extra beds the guest asked for (standard plan ignores)
   const gt=b.guestType||'FR';
-  const typeHotels = typeHotelsFor(b);                       // PR/Media/Volunteer/Kind → fixed hotel(s), if mapped
-  const typed = typeHotels.length>0;
   const cat=guestCategory(b);                                // H1..H4 / D2 / D3
+  const typeHotelsAll = typeHotelsFor(b);                    // PR/Media/Volunteer → their fixed hotel(s), if mapped
+  const typeHotels = typeHotelsAll.filter(id=>{ const hh=DB.hotels.find(x=>x.id===id); return hh && hh.active && hotelOriginEnd(hh,b.checkin,b.checkout)!==null; });  // keep only ones actually active & open for this stay
+  const typed = typeHotels.length>0;                         // if none of their mapped hotels are available (e.g. only Braj Nidhi left), fall through so they still get Braj Nidhi
   const catList = typed ? typeHotels : catHotelsFor(cat);    // hotels this guest is mapped to (empty = no restriction)
   const reserved=reservedHotelIds();                         // D1-only hotels — never for D2/D3
   // Is any ordinary (non-reserved, non-manual) guest house available to START this stay (open on check-in night)?
