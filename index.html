@@ -333,7 +333,7 @@ async function loadFromCloud(){
   const [hotelsR, rulesR, bookingsR, donationsR, notifsR, amtR, prR, crR] = await Promise.all([
     sb.from('hotels').select('data'),
     sb.from('rules').select('data').eq('id',1).maybeSingle(),
-    sb.from('bookings').select('id,data,dev_id'),
+    sb.from('bookings').select('id,data,dev_id,serial'),
     sb.from('donations').select('booking_id,receipt,donation_verified,receipt_wrong'),
     wantNotifs ? sb.from('notifications').select('id,data,ack,ts').order('ts',{ascending:false}).limit(300) : none,
     wantAmounts ? sb.from('amounts').select('booking_id,amount') : none,
@@ -346,7 +346,7 @@ async function loadFromCloud(){
   if(rulesR && rulesR.data && rulesR.data.data) DB.rules=Object.assign(JSON.parse(JSON.stringify(DEFAULT_RULES)),rulesR.data.data);
   const dmap={}; (donationsR.data||[]).forEach(d=>dmap[d.booking_id]=d);
   const amap={}; (amtR.data||[]).forEach(a=>amap[a.booking_id]=Number(a.amount));
-  if(Array.isArray(bookingsR.data)) DB.bookings=bookingsR.data.map(r=>{ const b=Object.assign({},r.data); b.id=r.id; b.devId=r.dev_id||''; const d=dmap[r.id]; if(d){ b.receipt=d.receipt||''; b.donationVerified=!!d.donation_verified; b.receiptWrong=!!d.receipt_wrong; } b.donation = (amap[r.id]!=null) ? amap[r.id] : catFloor(b.donationCategory); return b; });
+  if(Array.isArray(bookingsR.data)) DB.bookings=bookingsR.data.map(r=>{ const b=Object.assign({},r.data); b.id=r.id; b.devId=r.dev_id||''; b.serial=(r.serial!=null?r.serial:b.serial); const d=dmap[r.id]; if(d){ b.receipt=d.receipt||''; b.donationVerified=!!d.donation_verified; b.receiptWrong=!!d.receipt_wrong; } b.donation = (amap[r.id]!=null) ? amap[r.id] : catFloor(b.donationCategory); return b; });
   if(Array.isArray(notifsR.data)) DB.notifications=notifsR.data.map(n=>Object.assign({},n.data,{id:n.id,ack:!!n.ack,ts:n.ts?Date.parse(n.ts):Date.now()}));
   if(isAdmin){ if(Array.isArray(prR.data)){ DB.assign={}; DB.loginList=[]; prR.data.forEach(p=>{ DB.loginList.push(p); DB.assign[p.login_id]=p.assigned_name||''; }); }
     if(Array.isArray(crR.data)){ DB.creds={}; crR.data.forEach(c=>DB.creds[c.login_id]=c.pw); } }
@@ -398,7 +398,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b107';
+const APP_BUILD='2026-08-16-b108';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -453,8 +453,11 @@ function hotelName(id){ const h=DB.hotels.find(x=>x.id===id); return h?h.name:'�
    (Super Admin portal), fall back to the name saved on the booking, then the raw login ID. */
 function devoteeName(b){ if(!b) return ''; const a=(DB.assign && b.devId && DB.assign[b.devId]||'').trim(); if(a) return a; return (b.brahmachari||b.devId||'').trim(); }
 /* head of family + how many accompanied. Falls back to old guest-list format if present. */
-function headLabel(b){ if(b.head!==undefined&&b.head!=='') return esc(b.head)+(b.accompanying>0?' + '+b.accompanying:'');
-  return esc((b.guests||[]).join(', ')); }
+function istStamp(ms){ if(!ms) return ''; try{ return new Date(Number(ms)).toLocaleString('en-IN',{timeZone:'Asia/Kolkata',day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit',hour12:true}); }catch(e){ return ''; } }
+function reqSerial(b){ return b.serial!=null?('#'+String(b.serial).padStart(3,'0')):''; }
+function istMeta(b){ return b.created?(' \u00b7 \ud83d\udd52 '+istStamp(b.created)):''; }
+function headLabel(b){ const sn=(b.serial!=null?(reqSerial(b)+' \u00b7 '):''); if(b.head!==undefined&&b.head!=='') return sn+esc(b.head)+(b.accompanying>0?' + '+b.accompanying:'');
+  return sn+esc((b.guests||[]).join(', ')); }
 function peopleLabel(b){ return b.count+' person'+(b.count===1?'':'s')+((b.children||0)>0?` · ${b.children} child${b.children>1?'ren':''}`:''); }
 function fmtD(s){ if(!s) return '—'; const d=new Date(s+'T00:00'); return isNaN(d)?s:d.toLocaleDateString('en-IN',{day:'numeric',month:'short'}); }
 function stayLabel(b){
@@ -1391,7 +1394,7 @@ function guestCell(b,withSug){
   const dates=stayLabel(b);
   const catTag = (b.guestType&&b.guestType!=='FR') ? ' <span class="pill p-waitlist">'+esc(b.guestType)+'</span>' : ' '+catBadge(b);
   const fullTag = (b.bookedWhenFull && !b.hotel && b.status!=='confirmed') ? ' <span class="pill p-waitlist" title="Booked while all rooms were full">🕓 waitlist</span>' : '';
-  return `<b>${headLabel(b)}</b>${catTag}${fullTag} ${donFestBadge(b)}${raTierTag(b)}${editedTag(b)}${b.receiptWrong?' <span class="pill p-rejected">✗ receipt wrong</span>':''}<div class="muted">requested by ${esc(devoteeName(b))}${b.phone?` · 📱 ${esc(b.phone)}`:''}</div>
+  return `<b>${headLabel(b)}</b>${catTag}${fullTag} ${donFestBadge(b)}${raTierTag(b)}${editedTag(b)}${b.receiptWrong?' <span class="pill p-rejected">✗ receipt wrong</span>':''}<div class="muted">requested by ${esc(devoteeName(b))}${istMeta(b)}${b.phone?` · 📱 ${esc(b.phone)}`:''}</div>
       <div class="muted">${peopleLabel(b)}${b.family?' · 👪 family':''}${b.extraRequested>0?` · 🛏️ ${b.extraRequested} extra bed requested`:''}${reqRoomsTxt}${extraRoomTxt}</div>${raTierNote(b)}
       ${dateEditHTML(b)}
       ${b.note?`<div class="muted" style="background:#fff4e4;border-radius:6px;padding:4px 8px;margin-top:4px">📝 ${esc(b.note)}</div>`:''}${sugHTML}`;
