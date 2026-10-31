@@ -398,7 +398,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b114';
+const APP_BUILD='2026-08-16-b115';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -1353,7 +1353,7 @@ function allocCell(b){
       <div class="a-row"><span class="a-lbl">Rooms</span>
         <div class="stepper"><button onclick="stepRooms('${b.id}',-1)">−</button><input type="number" min="0" value="${b.rooms||0}" onchange="setField('${b.id}','rooms',this.value)"><button onclick="stepRooms('${b.id}',1)">+</button></div>
         ${extraCtl}</div>
-      ${metaLine}${transferCtl}${seva}${allocPanel(b)}${commentPanel(b)}</div>`;
+      ${metaLine}${transferCtl}${seva}${allocPanel(b)}</div>`;
 }
 /* Dates cell: Super Admin / VCM get editable check-in & check-out per stay (to shorten/adjust before confirming); others see read-only text. */
 function dateEditHTML(b){
@@ -1468,7 +1468,7 @@ function viewRequests(){
            ${isSuper()?`<button class="btn gray sm" onclick="approveNoReceipt('${b.id}')" title="Super Admin override">Confirm without receipt</button>`:''}
            <button class="btn gray sm" onclick="setStatus('${b.id}','waitlist')">Waitlist</button>
            <button class="btn red sm" onclick="setStatus('${b.id}','rejected')">Reject</button>`}
-      </div></td></tr>`; }).join('');
+      </div></td></tr><tr><td colspan="5" style="padding:0 12px 12px;border-top:none">${commentPanel(b)}</td></tr>`; }).join('');
   return `<div class="card"><h2 class="section">🆕 New Requests <span class="pill p-pending">${activeCount}</span></h2>
     <p class="subhead">Pick hotel → room type → adjust rooms → Confirm. Use <b>🔒 Lock &amp; Confirm</b> to confirm and protect it from auto-reallocation. Cancelled/pulled-back requests show greyed out with their room released.</p>
     <div class="flex" style="margin-bottom:12px;gap:10px;flex-wrap:wrap"><input placeholder="🔍 Search by guest name, number or devotee name" value="${esc(searchQ['reqRows']||'')}" oninput="setSearch('reqRows',this.value)" style="flex:1;min-width:220px">${sortMenu(reqSort,'setReqSort')}${reqFilterMenu()}</div>${fulfilBar()}
@@ -1502,7 +1502,7 @@ function viewBooked(){
         <button class="btn green sm" onclick="approve('${b.id}')">Save changes</button>
         <button class="btn gray sm" onclick="toggleLock('${b.id}')">${b.locked?'🔓 Unlock':'🔒 Lock'}</button>
         <button class="btn gray sm" onclick="setStatus('${b.id}','pending')">Move to pending</button>
-      </div></td></tr>`).join('');
+      </div></td></tr><tr><td colspan="5" style="padding:0 12px 12px;border-top:none">${commentPanel(b)}</td></tr>`).join('');
   return `<div class="card"><h2 class="section">✅ Booked <span class="pill p-confirmed">${list.length}</span></h2>
     <p class="subhead">These are confirmed. Edit the allocation and press <b>Save changes</b>. <b>Lock</b> a booking to protect it from automatic reallocation and swaps.</p>
     <div class="flex" style="margin-bottom:12px;gap:10px"><input placeholder="🔍 Search by guest name, number, devotee or hotel" value="${esc(searchQ['bookedRows']||'')}" oninput="setSearch('bookedRows',this.value)" style="flex:1"><button class="btn ${bookedShortOnly?'':'gray'} sm" onclick="toggleBookedShort()" title="Devotees given fewer rooms than requested — top them up when rooms free up">🚪 Short of rooms (${shortCount})</button>${sortMenu(bookedSort,'setBookedSort')}</div>${bookedBar()}
