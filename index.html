@@ -398,7 +398,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b111';
+const APP_BUILD='2026-08-16-b112';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -1417,6 +1417,12 @@ function setReqSort(v){ reqSort=v; render(); }
 /* Requests filter — by receipt approval or donation band (VCM sees the category floor; Super Admin the exact amount). */
 let reqFilter='all';
 function setReqFilter(v){ reqFilter=v; render(); }
+function fulfilStatus(b){ if(b.status==='cancelled'||b.status==='withdrawn'||b.status==='rejected') return 'closed';
+  const req=Math.max(1,b.roomsRequested||1), approved=allocApproved(b), decided=(b.focApproved!=null)||(b.paidApproved!=null)||b.status==='confirmed';
+  if(approved>=req) return 'full'; if(approved>0) return 'partial'; return decided?'none':'pending'; }
+function fulfilCounts(){ const c={full:0,partial:0,none:0,pending:0}; DB.bookings.forEach(b=>{ if(b.status==='confirmed') return; const f=fulfilStatus(b); if(c[f]!=null) c[f]++; }); return c; }
+function fulfilBar(){ if(!(isSuper()||isVcm())) return ''; const c=fulfilCounts(); const chip=(k,lbl,col)=>`<span onclick="setReqFilter('${reqFilter===k?'all':k}')" title="Click to filter the list" style="cursor:pointer;display:inline-block;padding:3px 10px;margin:2px 4px 2px 0;border-radius:12px;font-size:.85em;font-weight:600;border:1px solid ${col};background:${reqFilter===k?col:'#fff'};color:${reqFilter===k?'#fff':col}">${lbl}: ${c[k]}</span>`;
+  return `<div style="margin:7px 0 2px">${chip('partial','Partially fulfilled','#c77b17')}${chip('none','Not fulfilled','#b23b3b')}${chip('pending','Pending decision','#7a6a2f')}${chip('full','Fully fulfilled','#2f7d33')}</div>`; }
 function reqFilterMatch(b){ const d=Number(b.donation)||0;
   switch(reqFilter){
     case 'approved': return !!b.donationVerified;
@@ -1425,9 +1431,13 @@ function reqFilterMatch(b){ const d=Number(b.donation)||0;
     case 'band50to25L': return d>=50000 && d<250000;
     case 'below50k': return d<50000;
     case 'below25k': return d<25000;
+    case 'full': return fulfilStatus(b)==='full';
+    case 'partial': return fulfilStatus(b)==='partial';
+    case 'none': return fulfilStatus(b)==='none';
+    case 'pending': return fulfilStatus(b)==='pending';
     default: return true; } }
 function reqFilterMenu(){ const o=(v,l)=>`<option value="${v}"${reqFilter===v?' selected':''}>${l}</option>`;
-  return `<select onchange="setReqFilter(this.value)" style="max-width:235px">${o('all','Filter: All')}${o('approved','Receipt verified')}${o('above25L','Donation ≥ ₹2.5 Lakh')}${o('above50k','Donation ≥ ₹50k')}${o('band50to25L','₹50k – below ₹2.5 Lakh')}${o('below50k','Donation below ₹50k')}${o('below25k','Donation below ₹25k')}</select>`; }
+  return `<select onchange="setReqFilter(this.value)" style="max-width:235px">${o('all','Filter: All')}${o('approved','Receipt verified')}${o('above25L','Donation ≥ ₹2.5 Lakh')}${o('above50k','Donation ≥ ₹50k')}${o('band50to25L','₹50k – below ₹2.5 Lakh')}${o('below50k','Donation below ₹50k')}${o('below25k','Donation below ₹25k')}${o('full','Fulfilment: Fully')}${o('partial','Fulfilment: Partially')}${o('none','Fulfilment: Not fulfilled')}${o('pending','Fulfilment: Pending')}</select>`; }
 function setBookedSort(v){ bookedSort=v; render(); }
 function sortBookings(list,mode){ const l=[...list];
   if(mode==='amtHigh') l.sort((a,c)=>(c.donation||0)-(a.donation||0));
@@ -1461,7 +1471,7 @@ function viewRequests(){
       </div></td></tr>`; }).join('');
   return `<div class="card"><h2 class="section">🆕 New Requests <span class="pill p-pending">${activeCount}</span></h2>
     <p class="subhead">Pick hotel → room type → adjust rooms → Confirm. Use <b>🔒 Lock &amp; Confirm</b> to confirm and protect it from auto-reallocation. Cancelled/pulled-back requests show greyed out with their room released.</p>
-    <div class="flex" style="margin-bottom:12px;gap:10px;flex-wrap:wrap"><input placeholder="🔍 Search by guest name, number or devotee name" value="${esc(searchQ['reqRows']||'')}" oninput="setSearch('reqRows',this.value)" style="flex:1;min-width:220px">${sortMenu(reqSort,'setReqSort')}${reqFilterMenu()}</div>
+    <div class="flex" style="margin-bottom:12px;gap:10px;flex-wrap:wrap"><input placeholder="🔍 Search by guest name, number or devotee name" value="${esc(searchQ['reqRows']||'')}" oninput="setSearch('reqRows',this.value)" style="flex:1;min-width:220px">${sortMenu(reqSort,'setReqSort')}${reqFilterMenu()}</div>${fulfilBar()}
     <div class="scrollx"><table><thead><tr><th>Request</th><th>Donation</th><th>Status</th><th>Allocation</th><th>Action</th></tr></thead>
       <tbody id="reqRows">${rows||'<tr><td colspan="5" class="muted">No pending requests 🎉</td></tr>'}</tbody></table></div></div>`;
 }
