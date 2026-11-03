@@ -398,7 +398,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b118';
+const APP_BUILD='2026-08-16-b119';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -1641,7 +1641,9 @@ const DEFAULT_ROOM_LIMITS={H1:5,H2:3,H3:2,H4:1,D2:1,D3:0};
 function roomLimitFor(cat){ const m=(DB.rules&&DB.rules.roomLimits)||{}; const v=m[cat]; return (v!=null&&v!=='')?Number(v):(DEFAULT_ROOM_LIMITS[cat]||0); }
 function guaranteedRooms(donation){ return roomLimitFor(computeCat(donation)); }
 /* Devotee-facing status text based on donation tier and rooms requested. */
-function focEligibleRooms(b){ return isFreeStay(b) ? (guaranteedRooms(b.donation)||0) : 0; }
+function ladderNights(d){ d=Number(d)||0; return d>=250000?6:(d>=100000?2:(d>=50000?1:0)); }
+function focBudget(b){ if(b.focEligibleNights!=null) return Math.max(0,Number(b.focEligibleNights)||0); return isFreeStay(b)?ladderNights(b.donation):0; }
+function focEligibleRooms(b){ const n=reqNights(b), bud=focBudget(b); return n>0?Math.floor(bud/n):bud; }
 function reqNights(b){ if(!b.checkin||!b.checkout) return 1; const a=new Date(b.checkin+'T00:00'), c=new Date(b.checkout+'T00:00'); const n=Math.round((c-a)/86400000); return n>0?n:1; }
 function allocApproved(b){ return Math.max(0,Number(b.focApproved)||0)+Math.max(0,Number(b.paidApproved)||0); }
 function setFocApproved(id,v){ const b=DB.bookings.find(x=>x.id===id); if(!b||!(isSuper()||isVcm())) return; const cap=Math.max(0,Number(b.rooms)||0); let foc=Math.min(Math.max(0,parseInt(v)||0), cap); b.focApproved=foc; if(Math.max(0,Number(b.paidApproved)||0)+foc>cap) b.paidApproved=cap-foc; save(); render(); }
@@ -1655,7 +1657,7 @@ function commentPanel(b){ if(!(isSuper()||isVcm())) return ''; const cs=Array.is
 function setFocNights(id,v){ const b=DB.bookings.find(x=>x.id===id); if(!b||!(isSuper()||isVcm())) return; b.focEligibleNights=Math.max(0,parseInt(v)||0); save(); render(); }
 function focMarked(b){ const a=Math.max(0,Number(b.rooms)||0); if(b.focApproved!=null||b.paidApproved!=null) return Math.min(a,Math.max(0,Number(b.focApproved)||0)); return Math.min(a, focEligibleRooms(b)); }
 function paidMarked(b){ const a=Math.max(0,Number(b.rooms)||0); if(b.focApproved!=null||b.paidApproved!=null) return Math.min(a,Math.max(0,Number(b.paidApproved)||0)); return a-Math.min(a, focEligibleRooms(b)); }
-function allocPanel(b){ const req=Math.max(1,b.roomsRequested||1), elig=focEligibleRooms(b), foc=focMarked(b), paid=paidMarked(b), allocated=Math.max(0,Number(b.rooms)||0), approved=allocated, notApproved=Math.max(0,req-approved), nights=reqNights(b), focNights=(b.focEligibleNights!=null?b.focEligibleNights:nights), can=isSuper()||isVcm(); return `<div class="rooms-mini" style="margin-top:6px;background:#eef6ef;border:1px solid #cfe3d0;border-radius:8px;padding:7px 10px"><div style="font-weight:700;color:#2f7d33">🏠 Allocation — FOC / Paid</div><div style="margin-top:2px">Requested <b>${req}</b> · FOC-eligible <b>${elig}</b> · Approved <b>${approved}</b> · Not approved <b>${notApproved}</b>${(foc+paid)<approved?` · <b style="color:#c77b17">${approved-(foc+paid)}</b> to split FOC/Paid`:""}</div><div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:4px"><span style="white-space:nowrap">FOC ${allocStep(b.id,foc,'setFocApproved',can)}</span><span style="white-space:nowrap">Paid ${allocStep(b.id,paid,'setPaidApproved',can)}</span></div><div style="margin-top:5px"><span style="white-space:nowrap">🌙 FOC-eligible nights ${allocStep(b.id,focNights,'setFocNights',can)}</span> <span style="color:#6b6b6b;font-size:.82em">(editable; nights usable across any days)</span></div><div style="margin-top:3px;color:#6b6b6b">×${nights} night${nights===1?'':'s'} → FOC <b>${foc*nights}</b> · Paid <b>${paid*nights}</b> room-nights</div></div>`; }
+function allocPanel(b){ const req=Math.max(1,b.roomsRequested||1), elig=focEligibleRooms(b), foc=focMarked(b), paid=paidMarked(b), allocated=Math.max(0,Number(b.rooms)||0), approved=allocated, notApproved=Math.max(0,req-approved), nights=reqNights(b), focNights=focBudget(b), can=isSuper()||isVcm(); return `<div class="rooms-mini" style="margin-top:6px;background:#eef6ef;border:1px solid #cfe3d0;border-radius:8px;padding:7px 10px"><div style="font-weight:700;color:#2f7d33">🏠 Allocation — FOC / Paid</div><div style="margin-top:2px">Requested <b>${req}</b> · FOC-eligible <b>${elig}</b> · Approved <b>${approved}</b> · Not approved <b>${notApproved}</b>${(foc+paid)<approved?` · <b style="color:#c77b17">${approved-(foc+paid)}</b> to split FOC/Paid`:""}</div><div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:4px"><span style="white-space:nowrap">FOC ${allocStep(b.id,foc,'setFocApproved',can)}</span><span style="white-space:nowrap">Paid ${allocStep(b.id,paid,'setPaidApproved',can)}</span></div><div style="margin-top:5px"><span style="white-space:nowrap">🌙 FOC-eligible room-nights ${allocStep(b.id,focNights,'setFocNights',can)}</span> <span style="color:#6b6b6b;font-size:.82em">(₹50K→1 · ₹1L→2 · ₹2.5L→6 room-nights; editable)</span></div><div style="margin-top:3px;color:#6b6b6b">×${nights} night${nights===1?'':'s'} → FOC <b>${foc*nights}</b> · Paid <b>${paid*nights}</b> room-nights</div></div>`; }
 function guaranteeNote(b){
   const R=Math.max(1, b.roomsRequested||1), G=guaranteedRooms(b.donation);
   if(G<1) return '';
