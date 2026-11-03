@@ -398,7 +398,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b123';
+const APP_BUILD='2026-08-16-b124';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -1759,7 +1759,7 @@ function setStatus(id,s){ const b=DB.bookings.find(x=>x.id===id); if(!b)return; 
 
 /* ---------------- Admin: Hotels ---------------- */
 function viewHotels(){
-  const cards=hotelsByPriority().map(h=>{
+  const cards=hotelsByPriority().filter(h=>!h.hidden).map(h=>{
     const roomRows=h.rooms.map((r,i)=>{ const assigned=peakRoomsUsed(h.id,r.type), vac=Math.max(0,r.count-assigned);
       const key=h.id+'_'+i, editing=editRoomKey===key;
       if(editing) return `<tr>
