@@ -321,8 +321,8 @@ function isTopCat(c){ return c==='H1'||c==='H2'||c==='H3'||c==='H4'; }   // all 
 function bookingData(b){ const d=Object.assign({},b); delete d.donation; delete d.receipt; delete d.donationVerified; delete d.receiptWrong; delete d.devId; d.donationCategory=computeCat(b.donation);
   d.freeStay = (USER && USER.role==='vcm') ? !!b.freeStay : ((Number(b.donation)||0) >= freeStayThreshold(b));  // occasion-aware: RA ≥₹50k · JM ≥₹2.5L; preserved by VCM
   return d; }
-function freeStayThreshold(b){ return (b.donFest==='RA') ? (Number(DB.rules.freeMin)||50000) : (Number(DB.rules.jmFreeMin)||250000); }   // free room: RA ≥₹50k · JM ≥₹2.5L
-function autoConfirmThreshold(b){ return (b.donFest==='RA') ? (Number(DB.rules.freeMin)||50000) : (Number(DB.rules.jmConfirmMin)||100000); }   // assured/Confirmed: RA ≥₹50k (priority) · JM ≥₹1L
+function freeStayThreshold(b){ return Number(DB.rules.freeMin)||50000; }   // free room: RA ≥₹50k · JM ≥₹2.5L
+function autoConfirmThreshold(b){ return Number(DB.rules.jmConfirmMin)||100000; }   // assured/Confirmed: RA ≥₹50k (priority) · JM ≥₹1L
 function isFreeStay(b){ return (b.freeStay!==undefined) ? !!b.freeStay : ((Number(b.donation)||0) >= freeStayThreshold(b)); }
 function isAutoConfirm(b){ return (Number(b.donation)||0) >= autoConfirmThreshold(b); }
 async function loadFromCloud(){
@@ -398,7 +398,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b120';
+const APP_BUILD='2026-08-16-b121';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -1338,7 +1338,7 @@ function allocCell(b){
   const gt=b.guestType||'FR';
   let seva;
   if(gt!=='FR'){ seva=`<div class="seva-free">🎫 ${esc(gt)} guest — no room payment required</div>`; }
-  else if(isFreeStay(b)){ seva=`<div class="seva-free">🙏 Eligible for free accommodation${seeMoney()?` — ${b.donFest==='RA'?'Radha Ashtami':'Janmashtami'} ₹${freeStayThreshold(b).toLocaleString('en-IN')}+`:''}</div>`; }
+  else if(isFreeStay(b)){ seva=`<div class="seva-free">🙏 Eligible for free accommodation${seeMoney()?` — ₹${freeStayThreshold(b).toLocaleString('en-IN')}+ donation`:''}</div>`; }
   else { const selCh = b.sevaChannel || (staffCollects(b) ? 'GPP' : 'Devotee');   // pre-fill from the devotee's own choice on the booking form
     seva=`<div class="seva-collect ${b.sevaCollected?'done':''}">
        <span style="white-space:nowrap;font-weight:700">${b.sevaCollected?'✅ Seva by':'⚠ Seva by'}</span>
