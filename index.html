@@ -398,7 +398,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b126';
+const APP_BUILD='2026-08-16-b127';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -1040,6 +1040,10 @@ function checkReceipt(){
   el.style.borderColor = ok ? '' : 'var(--red)';
   if(msg) msg.style.display = ok ? 'none' : 'block';
 }
+function formStays(){ const cis=[...document.querySelectorAll('#dateRows .ci')], cos=[...document.querySelectorAll('#dateRows .co')]; const out=[]; for(let i=0;i<cis.length;i++){ if(cis[i].value&&cos[i].value) out.push({checkin:cis[i].value,checkout:cos[i].value}); } return out; }
+function rnFormBreak(){ const amt=Math.max(0,Number((document.getElementById('reqDonation')||{}).value)||0); const gt=((document.getElementById('reqGuestType')||{}).value)||'FR'; const stays=formStays(); if(!stays.length) return ''; return focRNBreak({donation:amt,guestType:gt,stays:stays}); }
+function updateRnBreak(){ const anchor=document.getElementById('sevaPlanNote'); if(!anchor) return; let el=document.getElementById('rnBreakNote'); if(!el){ el=document.createElement('div'); el.id='rnBreakNote'; el.style.marginTop='8px'; anchor.parentNode.insertBefore(el, anchor.nextSibling); } el.innerHTML=rnFormBreak(); }
+document.addEventListener('input', function(e){ const t=e.target; if(!t) return; if(t.id==='reqDonation'||t.id==='reqRooms'||(t.classList&&(t.classList.contains('ci')||t.classList.contains('co')))) updateRnBreak(); });
 function syncSevaPlan(){
   const sel=$('#reqSevaPlan'); if(!sel) return;
   const amt=Math.max(0, Number(($('#reqDonation')||{}).value)||0);
