@@ -398,7 +398,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b121';
+const APP_BUILD='2026-08-16-b122';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -991,7 +991,7 @@ function reqStep(id,delta){ const e=document.getElementById(id); if(!e)return;
 function reqStepChanged(id){ if(id==='reqTotal') updateSummary(); if(id==='reqRooms'){ renderDateRows(); updateExtraRoomUI(); } }
 function updateSummary(){ const te=$('#reqTotal'); if(!te) return;
   const p=$('#sumPeople'); if(p) p.textContent=Math.max(1,parseInt(te.value)||1); }
-function updateTypeUI(){ const t=($('#reqType')||{}).value||'FR'; const note=$('#typeNote'), star=$('#rcpStar'); const dfw=$('#donFestWrap'); if(dfw) dfw.style.display=(t==='FR')?'':'none';
+function updateTypeUI(){ const t=($('#reqType')||{}).value||'FR'; const note=$('#typeNote'), star=$('#rcpStar'); const dfw=$('#donFestWrap'); if(dfw) dfw.style.display='none';
   if(t==='FR'){ if(note)note.textContent='FR Guest — donation receipt number is required.'; if(star)star.style.display=''; }
   else { if(note)note.textContent=t+' guest — no receipt needed. You may leave donation and receipt blank.'; if(star)star.style.display='none'; }
   updateExtraRoomUI(); }
