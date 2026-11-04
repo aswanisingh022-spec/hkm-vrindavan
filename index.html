@@ -398,7 +398,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b129';
+const APP_BUILD='2026-08-16-b130';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -1221,7 +1221,7 @@ function viewMyReq(){
   return `<div class="card"><h2 class="section">📋 My Requests</h2>
     <p class="subhead">You can Edit a request, Cancel it, or Pull it back (withdraw). Cancelling or pulling back frees the room for others.</p>
     <table class="stack-mobile"><thead><tr><th>Guests</th><th>Dates</th><th>Donation</th><th>Accommodation</th><th>Extra bed</th><th>Status</th><th>Location</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table>
-    <p class="muted" style="margin-top:10px;font-size:12px">💡 <b>Radha Ashtami</b>: donation ₹50,000+ gets a free room and your status shows <b>Confirmed</b> right away (priority). <b>Janmashtami</b>: donation ₹2.5 lakh+ gets a free room; ₹1 lakh+ shows <b>Confirmed</b> right away. Other donations are on a paid basis (an accommodation seva is collected by the devotee or coordinator) and the room is confirmed once allocated. The exact guest house &amp; room (Location) is shared after allocation.</p></div>`;
+    <p class="muted" style="margin-top:10px;font-size:12px">💡 <b>Free room-nights by donation</b>: ₹50,000 → 1 free room-night · ₹1,00,000 → 2 · ₹2,50,000 → 6. The free room-nights apply first; any extra rooms or nights are on a paid basis (an accommodation seva is collected by the devotee or coordinator). The room is confirmed once allocated, and the exact guest house &amp; room (Location) is shared after allocation.</p></div>`;
 }
 
 /* ---------------- Admin: Dashboard ---------------- */
@@ -1699,14 +1699,14 @@ function devoteeStatusPill(b){
 /* Donation occasion — Janmashtami (JM) / Radha Ashtami (RA). Short forms for tight UI. */
 function donFestShort(b){ return b.donFest==='RA'?'RA':'JNM'; }   /* default (incl. all older bookings) = Janmashtami */
 function donFestLabel(b){ return b.donFest==='RA'?'Radha Ashtami':'Janmashtami'; }
-function donFestBadge(b){ return `<span class="pill p-edited" title="${donFestLabel(b)}">${donFestShort(b)}</span>`; }
+function donFestBadge(b){ return ''; }
 /* Super Admin & Accounts can correct the occasion if the receipt shows a discrepancy. */
 function setDonFest(id,val){ if(!(isSuper()||isAccounts())) return; const b=DB.bookings.find(x=>x.id===id); if(!b)return;
   b.donFest=val; save(); render(); toast('Occasion set to '+donFestLabel(b)); }
 /* accommodation payment status shown to the devotee */
 function sevaLabel(b){
   if((b.guestType||'FR')!=='FR') return `<span class="pill p-confirmed">🎫 ${esc(b.guestType)}</span>`;   // PR / Media / Volunteer: no seva prompt
-  if(b.donation>=DB.rules.freeMin) return '<span class="pill p-confirmed">🙏 Free stay</span>';
+  { const r=rnSplit(b); if(r.total){ if(r.paid===0) return '<span class="pill p-confirmed">🙏 Free stay</span>'; if(r.foc>0) return '<span class="pill p-edited">🙏 '+r.foc+' free · '+r.paid+' paid</span>'; } }
   return b.sevaCollected ? '<span class="pill p-confirmed">✅ Seva received</span>' : '<span class="pill p-pending">💰 Seva to be paid</span>'; }
 /* Record that a booking was edited: who (login id) + when + WHAT changed. Notifies admin/VCM; devotee sees it on My Requests. */
 function markEdited(b, note){ b.edited=true; b.editedAt=Date.now(); b.editedBy=USER.id; b.lastEditNote=note||'';
