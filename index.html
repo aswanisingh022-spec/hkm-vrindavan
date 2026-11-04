@@ -398,7 +398,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b128';
+const APP_BUILD='2026-08-16-b129';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -1098,8 +1098,8 @@ function submitReq(){
   const donationAmt=Math.max(0, Number($('#reqDonation').value)||0);
   const sevaPlanVal=(($('#reqSevaPlan')||{}).value||'devotee');
   const focOcc=(($('#reqDonFest')?getDonFest():'')||'JM');
-  const freeMinVal = focOcc==='RA' ? (Number(DB.rules.freeMin)||50000) : (Number(DB.rules.jmFreeMin)||250000);
-  if(sevaPlanVal==='foc' && donationAmt<freeMinVal){ toast('FOC (free of cost) needs '+(focOcc==='RA'?'Radha Ashtami':'Janmashtami')+' donation of ₹'+freeMinVal.toLocaleString('en-IN')+' or above. Please choose Devotee or Staff.'); return; }
+  const freeMinVal = Number(DB.rules.freeMin)||50000;
+  if(sevaPlanVal==='foc' && donationAmt<freeMinVal){ toast('FOC (free of cost) needs a donation of ₹'+freeMinVal.toLocaleString('en-IN')+' or above. Please choose Devotee or Staff.'); return; }
   const pref=[];
   const cis=[...document.querySelectorAll('.ci')], cos=[...document.querySelectorAll('.co')], exs=[...document.querySelectorAll('.exBed')];
   const stays=cis.map((el,idx)=>({checkin:el.value, checkout:(cos[idx]||{}).value||'', extra:!!(exs[idx]&&exs[idx].checked)}));
