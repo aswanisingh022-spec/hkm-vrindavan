@@ -398,7 +398,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b135';
+const APP_BUILD='2026-08-16-b136';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -1353,7 +1353,7 @@ function allocCell(b){
       <div class="a-row"><span class="a-lbl">Rooms</span>
         <div class="stepper"><button onclick="stepRooms('${b.id}',-1)">−</button><input type="number" min="0" value="${b.rooms||0}" onchange="setField('${b.id}','rooms',this.value)"><button onclick="stepRooms('${b.id}',1)">+</button></div>
         ${extraCtl}</div>
-      ${metaLine}${transferCtl}${seva}${allocPanel(b)}${confPanel(b)}</div>`;
+      ${metaLine}${transferCtl}${seva}${roomNightPanel(b)}</div>`;
 }
 /* Dates cell: Super Admin / VCM get editable check-in & check-out per stay (to shorten/adjust before confirming); others see read-only text. */
 function dateEditHTML(b){
@@ -1671,6 +1671,39 @@ function toggleConfCell(id,room,night){ var b=DB.bookings.find(function(x){retur
 function confirmAllCells(id){ var b=DB.bookings.find(function(x){return x.id===id;}); if(!b||!(isSuper()||isVcm())) return; var h=DB.hotels.find(function(x){return x.id===b.hotel;}); if(!h||!b.roomType){ if(typeof toast==='function') toast('Pick a hotel & room type first'); return; } if(!b.confCells||typeof b.confCells!=='object') b.confCells={}; var cells=rnCells(b).cells; var blocked=0; cells.forEach(function(c){ var key=c.room+'-'+c.night; if(b.confCells[key]) return; var st=stayListOf(b)[c.room]; var d=cellDate(st,c.night); var free=roomCapOnNight(h,b.roomType,d)-roomsUsedOnNight(h.id,b.roomType,d,b.id); if(free>0){ b.confCells[key]=true; } else blocked++; }); syncConfStatus(b); save(); render(); if(typeof toast==='function') toast(blocked? ('Confirmed '+confCount(b)+' room-nights · '+blocked+' unavailable (left pending)') : ('✓ Confirmed all '+confCount(b)+' room-nights')); }
 function unconfirmAll(id){ var b=DB.bookings.find(function(x){return x.id===id;}); if(!b||!(isSuper()||isVcm())) return; b.confCells={}; if(b.status==='confirmed'||b.status==='part') b.status='pending'; save(); render(); if(typeof toast==='function') toast('All room-nights unconfirmed — back to pending'); }
 function confPanel(b){ if(!(isSuper()||isVcm())) return ''; if((b.guestType||'FR')!=='FR') return ''; if(b.status==='rejected'||b.status==='cancelled'||b.status==='withdrawn') return ''; if(!b.hotel||!b.roomType) return ''; var rc=rnCells(b); var cells=rc.cells; if(!cells.length) return ''; var cs=confSetOf(b); var tot=cells.length, conf=cells.filter(function(c){return cs[c.room+'-'+c.night];}).length; var byRoom={}; cells.forEach(function(c){ (byRoom[c.room]=byRoom[c.room]||[]).push(c); }); var lines=Object.keys(byRoom).map(function(ri){ var chips=byRoom[ri].map(function(c){ var on=!!cs[c.room+'-'+c.night]; var col=on?'#2f7d33':'#9a6b00', bg=on?'#e8f5e9':'#fff6e5', bd=on?'#8cc591':'#e6c77a'; return `<span onclick="toggleConfCell('${b.id}',${c.room},${c.night})" style="cursor:pointer;display:inline-block;padding:2px 8px;margin:1px 2px;border-radius:6px;font-size:.78em;font-weight:700;border:1px solid ${bd};background:${bg};color:${col}">${on?'✓ ':''}N${c.night+1}</span>`; }).join(''); var st=stayListOf(b)[ri]; var dlab=st?(' <span style="font-size:.72em;color:#888">('+fmtD(st.checkin)+'→'+fmtD(st.checkout)+')</span>'):''; return `<div style="margin:3px 0"><span style="font-size:.8em;color:#555">Room ${Number(ri)+1}:</span> ${chips}${dlab}</div>`; }).join(''); var pill = conf===0 ? '<span class="pill p-pending">none confirmed</span>' : (conf>=tot ? '<span class="pill p-confirmed">fully confirmed</span>' : '<span class="pill p-edited">partly confirmed</span>'); var allBtn = conf>=tot ? '' : `<button class="btn green sm" style="margin-top:5px" onclick="confirmAllCells('${b.id}')">Confirm all free nights</button>`; var clrBtn = conf>0 ? `<button class="btn gray sm" style="margin-top:5px;margin-left:6px" onclick="unconfirmAll('${b.id}')">Unconfirm all</button>` : ''; return `<div style="margin-top:6px;background:#fff;border:1px solid #e0d6c0;border-radius:8px;padding:7px 10px"><div style="font-weight:700;color:#2f7d33">✅ Confirm by room-night ${pill}</div><div style="margin:2px 0;font-size:.82em;color:#555"><b>${conf}</b> of <b>${tot}</b> room-nights confirmed · tap a night to confirm / unconfirm</div>${lines}${allBtn}${clrBtn}</div>`; }
+function roomNightPanel(b){
+      var rc=rnCells(b); var cells=rc.cells; if(!cells.length) return '';
+      var dead=(b.status==='rejected'||b.status==='cancelled'||b.status==='withdrawn');
+      var can=(isSuper()||isVcm()) && !dead;
+      var hasHotel=!!(b.hotel&&b.roomType);
+      var cs=confSetOf(b);
+      var total=cells.length, foc=cells.filter(function(c){return c.foc;}).length, paid=total-foc;
+      var conf=cells.filter(function(c){return cs[c.room+'-'+c.night];}).length;
+      var byRoom={}; cells.forEach(function(c){ (byRoom[c.room]=byRoom[c.room]||[]).push(c); });
+      var lines=Object.keys(byRoom).map(function(ri){
+        var chips=byRoom[ri].map(function(c){
+          var on=!!cs[c.room+'-'+c.night];
+          var cCol=on?'#2f7d33':'#9a6b00', cBg=on?'#e8f5e9':'#fff6e5', cBd=on?'#8cc591':'#e6c77a';
+          var pCol=c.foc?'#2f7d33':'#2a6fb0', pBg=c.foc?'#d8efdb':'#dcebfb';
+          var confAttr = (can&&hasHotel) ? ("onclick=\"toggleConfCell('"+b.id+"',"+c.room+","+c.night+")\" style=\"cursor:pointer;") : "style=\"";
+          var priceAttr = can ? ("onclick=\"event.stopPropagation();toggleFocCell('"+b.id+"',"+c.room+","+c.night+")\" title=\"switch FOC / Paid\" style=\"cursor:pointer;") : "style=\"";
+          return "<span "+confAttr+"display:inline-flex;align-items:center;gap:5px;padding:2px 6px 2px 9px;margin:2px;border-radius:8px;font-size:.78em;font-weight:700;border:1px solid "+cBd+";background:"+cBg+";color:"+cCol+"\">"
+            + (on?"✓ ":"")+"N"+(c.night+1)
+            + "<span "+priceAttr+"padding:0 6px;border-radius:5px;font-size:.92em;font-weight:700;border:1px solid "+pCol+";background:"+pBg+";color:"+pCol+"\">"+(c.foc?"FOC":"Paid")+"</span>"
+            + "</span>";
+        }).join("");
+        var st=stayListOf(b)[ri]; var dlab=st?(" <span style=\"font-size:.72em;color:#888\">("+fmtD(st.checkin)+"→"+fmtD(st.checkout)+")</span>"):"";
+        return "<div style=\"margin:3px 0\"><span style=\"font-size:.8em;color:#555\">Room "+(Number(ri)+1)+":</span> "+chips+dlab+"</div>";
+      }).join("");
+      var pill = conf===0 ? "<span class=\"pill p-pending\">none confirmed</span>" : (conf>=total ? "<span class=\"pill p-confirmed\">fully confirmed</span>" : "<span class=\"pill p-edited\">partly confirmed</span>");
+      var hint = (can&&hasHotel) ? "<div style=\"font-size:.72em;color:#999;margin:2px 0 3px\">Tap a night to confirm · tap the FOC / Paid badge to switch price</div>" : "";
+      var needHotel = (can&&!hasHotel) ? "<div style=\"font-size:.74em;color:#b26a00;margin:2px 0\">Pick a hotel & room type above, then tap nights to confirm</div>" : "";
+      var btns = (can&&hasHotel) ? ("<div style=\"margin-top:6px\">"+(conf>=total?"":"<button class=\"btn green sm\" onclick=\"confirmAllCells('"+b.id+"')\">Confirm all free nights</button>")+(conf>0?"<button class=\"btn gray sm\" style=\"margin-left:6px\" onclick=\"unconfirmAll('"+b.id+"')\">Unconfirm all</button>":"")+"</div>") : "";
+      return "<div style=\"margin-top:6px;background:#fff;border:1px solid #e0d6c0;border-radius:8px;padding:8px 10px\">"
+        + "<div style=\"font-weight:700;color:#2f7d33\">🏠 Rooms & nights "+pill+"</div>"
+        + "<div style=\"margin:2px 0;font-size:.82em;color:#555\">Total <b>"+total+"</b> · <b style=\"color:#2f7d33\">"+foc+"</b> FOC (free) · <b style=\"color:#2a6fb0\">"+paid+"</b> paid · <b>"+conf+"</b>/<b>"+total+"</b> confirmed</div>"
+        + hint + needHotel + lines + btns + "</div>";
+    }
 function toggleFocCell(id,room,night){ const b=DB.bookings.find(x=>x.id===id); if(!b||!(isSuper()||isVcm())) return; const budget=((b.guestType||'FR')!=='FR')?1e9:focBudget(b); if(!b.focCells||typeof b.focCells!=='object'||!Object.keys(b.focCells).length){ const rc=rnCells(b); b.focCells={}; rc.cells.forEach(c=>{ if(c.foc) b.focCells[c.room+'-'+c.night]=true; }); } const key=room+'-'+night; if(b.focCells[key]){ delete b.focCells[key]; } else { if(Object.keys(b.focCells).length>=budget){ if(typeof toast==='function') toast('FOC budget full ('+budget+' room-nights). Increase FOC-eligible room-nights, or free another night first.'); return; } b.focCells[key]=true; } save(); render(); }
 function focRNBreak(b){ const rc=rnCells(b); const cells=rc.cells; if(!cells.length) return ''; const total=cells.length, foc=cells.filter(c=>c.foc).length, paid=total-foc; const canEdit=isSuper()||isVcm(); const byRoom={}; cells.forEach(c=>{ (byRoom[c.room]=byRoom[c.room]||[]).push(c); }); const lines=Object.keys(byRoom).map(ri=>{ const chips=byRoom[ri].map(c=>{ const col=c.foc?'#2f7d33':'#2a6fb0', bg=c.foc?'#e8f5e9':'#e8f1fb'; return `<span ${canEdit?`onclick="toggleFocCell('${b.id}',${c.room},${c.night})" `:''}style="${canEdit?'cursor:pointer;':''}display:inline-block;padding:1px 7px;margin:1px 2px;border-radius:6px;font-size:.78em;font-weight:600;border:1px solid ${col};background:${bg};color:${col}">N${c.night+1}: ${c.foc?'FOC':'Paid'}</span>`; }).join(''); return `<div style="margin:3px 0"><span style="font-size:.8em;color:#555">Room ${Number(ri)+1}:</span> ${chips}</div>`; }).join(''); return `<div style="margin-top:6px;background:#fff;border:1px solid #e3ddcf;border-radius:8px;padding:7px 10px"><div style="font-weight:700;color:#8a6d1a">\u{1F9EE} Room-nights by donation</div><div style="margin:2px 0">Total <b>${total}</b> → <b style="color:#2f7d33">${foc}</b> FOC (free)${rc.nonFR?' · guest category':''} · <b style="color:#2a6fb0">${paid}</b> paid</div>${canEdit?'<div style="font-size:.72em;color:#999;margin-bottom:2px">tap a night to switch FOC / Paid</div>':''}${lines}</div>`; }
 function focMarked(b){ const a=apprRooms(b); if(b.focApproved!=null||b.paidApproved!=null) return Math.min(a,Math.max(0,Number(b.focApproved)||0)); if((b.guestType||'FR')!=='FR') return a; return Math.min(a, focEligibleRooms(b)); }
