@@ -398,7 +398,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b139';
+const APP_BUILD='2026-08-16-b140';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -468,7 +468,7 @@ function stayLabel(b){
 }
 function origStayLabel(b){ if(!b.origStays||!b.origStays.length) return ''; return stayLabel({stays:b.origStays}); }
 function datesChanged(b){ return !!(b.datesModified && b.origStays && b.origStays.length && stayLabel({stays:b.origStays})!==stayLabel(b)); }
-function statusPill(s){ var m={pending:'p-pending',confirmed:'p-confirmed',part:'p-edited',rejected:'p-rejected',waitlist:'p-waitlist',cancelled:'p-cancelled',withdrawn:'p-withdrawn'}; var lbl={part:'partly confirmed'}; return `<span class="pill ${m[s]||'p-pending'}">${lbl[s]||s}</span>`; }
+function statusPill(s){ var m={pending:'p-pending',saved:'p-waitlist',confirmed:'p-confirmed',part:'p-edited',rejected:'p-rejected',waitlist:'p-waitlist',cancelled:'p-cancelled',withdrawn:'p-withdrawn'}; var lbl={part:'partly confirmed',saved:'saved · pending receipt'}; return '<span class="pill '+(m[s]||'p-pending')+'">'+(lbl[s]||s)+'</span>'; }
 function toast(msg){ const t=$('#toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),2200); }
 function showNotice(title,bodyHTML,icon){ $('#noticeIcon').textContent=icon||'ℹ️'; $('#noticeTitle').textContent=title; $('#noticeBody').innerHTML=bodyHTML; $('#noticeOverlay').style.display='flex'; }
 function closeNotice(){ $('#noticeOverlay').style.display='none'; }
@@ -614,8 +614,8 @@ function nightCustom(h,d){ const dr=h.dayRooms && h.dayRooms[d]; return !!(dr &&
 function nightCapped(h,d){ return !!(h.nightCaps && h.nightCaps[d]!=null) && !nightCustom(h,d); }
 /* Rooms of a type occupied on the night of d (checkin ≤ d < checkout). A booking in a date-limited
    hotel only occupies it on the hotel's OPEN nights — on later nights the guest has moved to Braj Nidhi. */
-function roomsUsedOnNight(hid,type,d,excludeId){ var h=DB.hotels.find(function(x){return x.id===hid;}); return DB.bookings.filter(function(b){return b.hotel===hid&&b.id!==excludeId&&(b.status==='confirmed'||b.status==='part')&&(!h||hotelOpenOnNight(h,d));}).reduce(function(s,b){return s+confirmedRoomsOnNight(b,type,d);},0); }
-function confirmedRoomsOnNight(b,type,d){ if(b.roomPlan&&b.roomPlan.length){ return ((b.checkin||DB.rules.eventStart)<=d && d<(b.checkout||DB.rules.eventEnd)) ? bookingRooms(b).filter(function(rp){return rp.type===type;}).reduce(function(a,rp){return a+rp.rooms;},0) : 0; } if((b.roomType||'')!==type) return 0; var cs=confSetOf(b); if(!Object.keys(cs).length) return 0; var list=stayListOf(b); var n=0; list.forEach(function(st,ri){ var nn=stayNightsEx(st); for(var ni=0;ni<nn;ni++){ if(cs[ri+'-'+ni] && cellDate(st,ni)===d) n++; } }); return n; }
+function roomsUsedOnNight(hid,type,d,excludeId){ var h=DB.hotels.find(function(x){return x.id===hid;}); return DB.bookings.filter(function(b){ return b.hotel===hid&&b.id!==excludeId && b.status!=='rejected'&&b.status!=='cancelled'&&b.status!=='withdrawn' && (!h||hotelOpenOnNight(h,d)); }).reduce(function(s,b){return s+confirmedRoomsOnNight(b,type,d);},0); }
+function confirmedRoomsOnNight(b,type,d){ if(b.roomPlan&&b.roomPlan.length){ return ((b.checkin||DB.rules.eventStart)<=d && d<(b.checkout||DB.rules.eventEnd)) ? bookingRooms(b).filter(function(rp){return rp.type===type;}).reduce(function(a,rp){return a+rp.rooms;},0) : 0; } if((b.roomType||'')!==type) return 0; var cs=bookedSetOf(b); if(!Object.keys(cs).length) return 0; var list=stayListOf(b); var n=0; list.forEach(function(st,ri){ var nn=stayNightsEx(st); for(var ni=0;ni<nn;ni++){ if(cs[ri+'-'+ni] && cellDate(st,ni)===d) n++; } }); return n; }
 /* Rooms of a type free for a WHOLE stay [ci → co): the tightest night wins. 0 if the hotel is closed any night. */
 function freeRoomsForStay(h,type,ci,co,excludeId){ if(!ci||!co){ const r=(h.rooms||[]).find(x=>x.type===type); return r?Math.max(0,r.count-roomsAssignedByType(h.id,type,excludeId)):0; }
   let mn=Infinity; for(let d=ci; d<co; d=nextDay(d)){ if(!hotelOpenOnNight(h,d)) return 0; const free=roomCapOnNight(h,type,d)-roomsUsedOnNight(h.id,type,d,excludeId); if(free<mn) mn=free; }
@@ -1655,7 +1655,7 @@ function commentPanel(b){ if(!(isSuper()||isVcm())) return ''; const cs=Array.is
   const items=cs.map(c=>`<div style="margin:3px 0;padding:4px 7px;background:#fff;border:1px solid #e3ddcf;border-radius:6px"><div style="font-size:.78em;color:#7a6a2f"><b>${esc(c.author||'Admin')}</b>${c.role?' ('+esc(c.role)+')':''} · ${istStamp(c.ts)}${isSuper()?` · <a href="#" onclick="delComment('${b.id}','${c.id}');return false" style="color:#b23b3b;text-decoration:none">✕</a>`:''}</div><div style="white-space:pre-wrap">${esc(c.text||'')}</div></div>`).join('')||'<div style="color:#9a9a9a;font-size:.8em">No internal notes yet.</div>';
   return `<div style="margin-top:7px;background:#f6f3ea;border:1px solid #e3ddcf;border-radius:8px;padding:7px 9px"><div style="font-weight:700;color:#7a6a2f">🗒 Internal notes <span style="font-weight:400;font-size:.78em;color:#9a9a9a">(staff only — not shown to devotees)</span></div>${items}<div style="display:flex;gap:5px;margin-top:5px"><textarea id="cmt-${b.id}" rows="1" placeholder="Add a note…" style="flex:1;min-width:140px;font-family:inherit;font-size:.85em;padding:4px 6px;border:1px solid #ccc;border-radius:6px"></textarea><button class="btn sm" onclick="addComment('${b.id}')" style="white-space:nowrap">Add note</button></div></div>`; }
 function setFocNights(id,v){ const b=DB.bookings.find(x=>x.id===id); if(!b||!(isSuper()||isVcm())) return; b.focEligibleNights=Math.max(0,parseInt(v)||0); save(); render(); }
-function apprRooms(b){ return (b.status==='confirmed'||b.status==='part') ? distinctConfRooms(b) : 0; }
+function apprRooms(b){ return distinctBookedRooms(b); }
 function stayListOf(b){ return (b.stays&&b.stays.length)?b.stays:(b.checkin?[{checkin:b.checkin,checkout:b.checkout}]:[]); }
 function stayNightsEx(st){ if(!st||!st.checkin||!st.checkout) return 1; const a=new Date(st.checkin+'T00:00'), c=new Date(st.checkout+'T00:00'); const n=Math.round((c-a)/86400000); return n>0?n:1; }
 function rnCells(b){ const list=stayListOf(b); const nonFR=(b.guestType||'FR')!=='FR'; const budget=nonFR?1e9:focBudget(b); const cells=[]; list.forEach((st,ri)=>{ const n=stayNightsEx(st); for(let ni=0;ni<n;ni++) cells.push({room:ri,night:ni,foc:false}); }); const manual=(b.focCells&&typeof b.focCells==='object'&&Object.keys(b.focCells).length>0); if(manual){ let used=0; cells.forEach(c=>{ if(b.focCells[c.room+'-'+c.night] && used<budget){ c.foc=true; used++; } }); } else { let bud=budget; const maxN=cells.reduce((m,c)=>Math.max(m,c.night+1),0); for(let ni=0;ni<maxN;ni++){ cells.forEach(c=>{ if(c.night===ni && !c.foc && bud>0){ c.foc=true; bud--; } }); } } return {cells:cells,budget:budget,nonFR:nonFR}; }
@@ -1666,45 +1666,56 @@ function allocCellsMap(b){ var o={}; var nr=Math.max(0,Number(b.rooms)||0); rnCe
 function reqCellCount(b){ return rnCells(b).cells.length; }
 function confCount(b){ var cs=confSetOf(b); return Object.keys(cs).filter(function(k){return cs[k];}).length; }
 function distinctConfRooms(b){ var cs=confSetOf(b); var rr={}; Object.keys(cs).forEach(function(k){ if(cs[k]) rr[k.split('-')[0]]=1; }); return Object.keys(rr).length; }
-function syncConfStatus(b){ var tot=reqCellCount(b), c=confCount(b); if(c<=0){ if(b.status==='confirmed'||b.status==='part') b.status='pending'; } else if(c>=tot){ b.status='confirmed'; } else { b.status='part'; } }
-function toggleConfCell(id,room,night){ var b=DB.bookings.find(function(x){return x.id===id;}); if(!b||!(isSuper()||isVcm())) return; var h=DB.hotels.find(function(x){return x.id===b.hotel;}); if(!h||!b.roomType){ if(typeof toast==='function') toast('Pick a hotel & room type first'); return; } if(!b.confCells||typeof b.confCells!=='object'||!Object.keys(b.confCells).length){ b.confCells=Object.assign({},confSetOf(b)); } var key=room+'-'+night; if(b.confCells[key]){ delete b.confCells[key]; } else { var st=stayListOf(b)[room]; var d=cellDate(st,night); var free=roomCapOnNight(h,b.roomType,d)-roomsUsedOnNight(h.id,b.roomType,d,b.id); if(free<=0){ if(typeof toast==='function') toast('No '+b.roomType+' free at '+h.name+' on '+fmtD(d)+' — cannot confirm that night'); return; } b.confCells[key]=true; } syncConfStatus(b); save(); render(); }
-function confirmAllCells(id){ var b=DB.bookings.find(function(x){return x.id===id;}); if(!b||!(isSuper()||isVcm())) return; var h=DB.hotels.find(function(x){return x.id===b.hotel;}); if(!h||!b.roomType){ if(typeof toast==='function') toast('Pick a hotel & room type first'); return; } if(!b.confCells||typeof b.confCells!=='object') b.confCells={}; var cells=rnCells(b).cells; var blocked=0; cells.forEach(function(c){ var key=c.room+'-'+c.night; if(b.confCells[key]) return; var st=stayListOf(b)[c.room]; var d=cellDate(st,c.night); var free=roomCapOnNight(h,b.roomType,d)-roomsUsedOnNight(h.id,b.roomType,d,b.id); if(free>0){ b.confCells[key]=true; } else blocked++; }); syncConfStatus(b); save(); render(); if(typeof toast==='function') toast(blocked? ('Confirmed '+confCount(b)+' room-nights · '+blocked+' unavailable (left pending)') : ('✓ Confirmed all '+confCount(b)+' room-nights')); }
-function unconfirmAll(id){ var b=DB.bookings.find(function(x){return x.id===id;}); if(!b||!(isSuper()||isVcm())) return; b.confCells={}; if(b.status==='confirmed'||b.status==='part') b.status='pending'; save(); render(); if(typeof toast==='function') toast('All room-nights unconfirmed — back to pending'); }
+function syncConfStatus(b){ var tot=rnCells(b).cells.length; var bc=bookedCount(b); var sc=selCount(b); if(bc>0){ b.status=(bc>=tot?'confirmed':'part'); } else if(sc>0){ b.status='saved'; } else { b.status='pending'; } }
+function toggleConfCell(id,room,night){ var b=DB.bookings.find(function(x){return x.id===id;}); if(!b||!(isSuper()||isVcm())) return; var h=DB.hotels.find(function(x){return x.id===b.hotel;}); if(!h||!b.roomType){ if(typeof toast==='function') toast('Pick a hotel & room type first'); return; } if(!b.confCells||typeof b.confCells!=='object') b.confCells=Object.assign({},selSetOf(b)); var key=room+'-'+night; if(b.confCells[key]){ delete b.confCells[key]; } else { var st=stayListOf(b)[room]; var d=cellDate(st,night); var free=roomCapOnNight(h,b.roomType,d)-roomsUsedOnNight(h.id,b.roomType,d,b.id); if(free<=0){ if(typeof toast==='function') toast('No '+b.roomType+' free at '+h.name+' on '+fmtD(d)+' — cannot select that night'); return; } b.confCells[key]=true; } syncConfStatus(b); save(); render(); }
+function confirmAllCells(id){ var b=DB.bookings.find(function(x){return x.id===id;}); if(!b||!(isSuper()||isVcm())) return; var h=DB.hotels.find(function(x){return x.id===b.hotel;}); if(!h||!b.roomType){ if(typeof toast==='function') toast('Pick a hotel & room type first'); return; } if(!b.confCells||typeof b.confCells!=='object') b.confCells=Object.assign({},selSetOf(b)); var cells=rnCells(b).cells; var blocked=0; cells.forEach(function(c){ var key=c.room+'-'+c.night; if(b.confCells[key]) return; var st=stayListOf(b)[c.room]; var d=cellDate(st,c.night); var free=roomCapOnNight(h,b.roomType,d)-roomsUsedOnNight(h.id,b.roomType,d,b.id); if(free>0){ b.confCells[key]=true; } else blocked++; }); if(canBookNow(b)){ b.bookedCells=Object.assign({},selSetOf(b)); syncConfStatus(b); save(); render(); if(typeof toast==='function') toast(blocked? ('Booked '+bookedCount(b)+' room-nights · '+blocked+' unavailable'):('✓ Booked all '+bookedCount(b)+' room-nights')); } else { syncConfStatus(b); save(); render(); if(typeof toast==='function') toast('💾 Saved — '+selCount(b)+' nights selected. Rooms are booked once the receipt is verified.'); } }
+function unconfirmAll(id){ var b=DB.bookings.find(function(x){return x.id===id;}); if(!b||!(isSuper()||isVcm())) return; b.confCells={}; b.bookedCells={}; b.status='pending'; save(); render(); if(typeof toast==='function') toast('Cleared — selection and booking removed (back to pending)'); }
 function confPanel(b){ if(!(isSuper()||isVcm())) return ''; if((b.guestType||'FR')!=='FR') return ''; if(b.status==='rejected'||b.status==='cancelled'||b.status==='withdrawn') return ''; if(!b.hotel||!b.roomType) return ''; var rc=rnCells(b); var cells=rc.cells; if(!cells.length) return ''; var cs=confSetOf(b); var tot=cells.length, conf=cells.filter(function(c){return cs[c.room+'-'+c.night];}).length; var byRoom={}; cells.forEach(function(c){ (byRoom[c.room]=byRoom[c.room]||[]).push(c); }); var lines=Object.keys(byRoom).map(function(ri){ var chips=byRoom[ri].map(function(c){ var on=!!cs[c.room+'-'+c.night]; var col=on?'#2f7d33':'#9a6b00', bg=on?'#e8f5e9':'#fff6e5', bd=on?'#8cc591':'#e6c77a'; return `<span onclick="toggleConfCell('${b.id}',${c.room},${c.night})" style="cursor:pointer;display:inline-block;padding:2px 8px;margin:1px 2px;border-radius:6px;font-size:.78em;font-weight:700;border:1px solid ${bd};background:${bg};color:${col}">${on?'✓ ':''}N${c.night+1}</span>`; }).join(''); var st=stayListOf(b)[ri]; var dlab=st?(' <span style="font-size:.72em;color:#888">('+fmtD(st.checkin)+'→'+fmtD(st.checkout)+')</span>'):''; return `<div style="margin:3px 0"><span style="font-size:.8em;color:#555">Room ${Number(ri)+1}:</span> ${chips}${dlab}</div>`; }).join(''); var pill = conf===0 ? '<span class="pill p-pending">none confirmed</span>' : (conf>=tot ? '<span class="pill p-confirmed">fully confirmed</span>' : '<span class="pill p-edited">partly confirmed</span>'); var allBtn = conf>=tot ? '' : `<button class="btn green sm" style="margin-top:5px" onclick="confirmAllCells('${b.id}')">Confirm all free nights</button>`; var clrBtn = conf>0 ? `<button class="btn gray sm" style="margin-top:5px;margin-left:6px" onclick="unconfirmAll('${b.id}')">Unconfirm all</button>` : ''; return `<div style="margin-top:6px;background:#fff;border:1px solid #e0d6c0;border-radius:8px;padding:7px 10px"><div style="font-weight:700;color:#2f7d33">✅ Confirm by room-night ${pill}</div><div style="margin:2px 0;font-size:.82em;color:#555"><b>${conf}</b> of <b>${tot}</b> room-nights confirmed · tap a night to confirm / unconfirm</div>${lines}${allBtn}${clrBtn}</div>`; }
 function roomNightPanel(b){
       var rc=rnCells(b); var cells=rc.cells; if(!cells.length) return '';
       var dead=(b.status==='rejected'||b.status==='cancelled'||b.status==='withdrawn');
       var can=(isSuper()||isVcm()) && !dead;
       var hasHotel=!!(b.hotel&&b.roomType);
-      var cs=confSetOf(b);
+      var sel=selSetOf(b), bk=bookedSetOf(b);
       var total=cells.length, foc=cells.filter(function(c){return c.foc;}).length, paid=total-foc;
-      var conf=cells.filter(function(c){return cs[c.room+'-'+c.night];}).length;
+      var selN=cells.filter(function(c){return sel[c.room+'-'+c.night];}).length;
+      var bkN=cells.filter(function(c){return bk[c.room+'-'+c.night];}).length;
+      var rcptNeeded=needsReceiptFor(b), rcptOk=canBookNow(b);
       var byRoom={}; cells.forEach(function(c){ (byRoom[c.room]=byRoom[c.room]||[]).push(c); });
       var lines=Object.keys(byRoom).map(function(ri){
         var chips=byRoom[ri].map(function(c){
-          var on=!!cs[c.room+'-'+c.night];
-          var cCol=on?'#2f7d33':'#9a6b00', cBg=on?'#e8f5e9':'#fff6e5', cBd=on?'#8cc591':'#e6c77a';
+          var k=c.room+'-'+c.night; var isSel=!!sel[k], isBk=!!bk[k];
+          var cCol,cBg,cBd,mark;
+          if(isBk){ cCol='#2f7d33'; cBg='#e8f5e9'; cBd='#8cc591'; mark='✓ '; }
+          else if(isSel){ cCol='#9a6b00'; cBg='#fff6e5'; cBd='#e6c77a'; mark='✓ '; }
+          else { cCol='#777'; cBg='#f4f2ec'; cBd='#dcd6c6'; mark=''; }
           var pCol=c.foc?'#2f7d33':'#2a6fb0', pBg=c.foc?'#d8efdb':'#dcebfb';
-          var confAttr = (can&&hasHotel) ? ("onclick=\"toggleConfCell('"+b.id+"',"+c.room+","+c.night+")\" style=\"cursor:pointer;") : "style=\"";
-          var priceAttr = can ? ("onclick=\"event.stopPropagation();toggleFocCell('"+b.id+"',"+c.room+","+c.night+")\" title=\"switch FOC / Paid\" style=\"cursor:pointer;") : "style=\"";
-          return "<span "+confAttr+"display:inline-flex;align-items:center;gap:5px;padding:2px 6px 2px 9px;margin:2px;border-radius:8px;font-size:.78em;font-weight:700;border:1px solid "+cBd+";background:"+cBg+";color:"+cCol+"\">"
-            + (on?"✓ ":"")+"N"+(c.night+1)
-            + "<span "+priceAttr+"padding:0 6px;border-radius:5px;font-size:.92em;font-weight:700;border:1px solid "+pCol+";background:"+pBg+";color:"+pCol+"\">"+(c.foc?"FOC":"Paid")+"</span>"
-            + "</span>";
+          var confAttr=(can&&hasHotel)?("onclick=\"toggleConfCell('"+b.id+"',"+c.room+","+c.night+")\" style=\"cursor:pointer;"):"style=\"";
+          var priceAttr=can?("onclick=\"event.stopPropagation();toggleFocCell('"+b.id+"',"+c.room+","+c.night+")\" title=\"switch FOC / Paid\" style=\"cursor:pointer;"):"style=\"";
+          return "<span "+confAttr+"display:inline-flex;align-items:center;gap:5px;padding:2px 6px 2px 9px;margin:2px;border-radius:8px;font-size:.78em;font-weight:700;border:1px solid "+cBd+";background:"+cBg+";color:"+cCol+"\">"+mark+"N"+(c.night+1)+"<span "+priceAttr+"padding:0 6px;border-radius:5px;font-size:.92em;font-weight:700;border:1px solid "+pCol+";background:"+pBg+";color:"+pCol+"\">"+(c.foc?"FOC":"Paid")+"</span></span>";
         }).join("");
         var st=stayListOf(b)[ri]; var dlab=st?(" <span style=\"font-size:.72em;color:#888\">("+fmtD(st.checkin)+"→"+fmtD(st.checkout)+")</span>"):"";
         return "<div style=\"margin:3px 0\"><span style=\"font-size:.8em;color:#555\">Room "+(Number(ri)+1)+":</span> "+chips+dlab+"</div>";
       }).join("");
-      var pill = conf===0 ? "<span class=\"pill p-pending\">none confirmed</span>" : (conf>=total ? "<span class=\"pill p-confirmed\">fully confirmed</span>" : "<span class=\"pill p-edited\">partly confirmed</span>");
-      var hint = (can&&hasHotel) ? "<div style=\"font-size:.72em;color:#999;margin:2px 0 3px\">Tap a night to confirm · tap the FOC / Paid badge to switch price</div>" : "";
-      var needHotel = (can&&!hasHotel) ? "<div style=\"font-size:.74em;color:#b26a00;margin:2px 0\">Pick a hotel & room type above, then tap nights to confirm</div>" : "";
+      var pill = bkN>0 ? (bkN>=total?"<span class=\"pill p-confirmed\">fully confirmed</span>":"<span class=\"pill p-edited\">partly confirmed</span>") : (selN>0?"<span class=\"pill p-waitlist\">saved · pending receipt</span>":"<span class=\"pill p-pending\">nothing selected</span>");
+      var hint=(can&&hasHotel)?"<div style=\"font-size:.72em;color:#999;margin:2px 0 3px\">Tap a night to select · tap the FOC / Paid badge to switch price</div>":"";
+      var needHotel=(can&&!hasHotel)?"<div style=\"font-size:.74em;color:#b26a00;margin:2px 0\">Pick a hotel & room type above, then tap nights to select</div>":"";
+      var rcptNote=(can&&hasHotel&&rcptNeeded&&!rcptOk)?"<div style=\"font-size:.74em;color:#b26a00;background:#fff6e5;border:1px solid #e6c77a;border-radius:6px;padding:4px 7px;margin:3px 0\">⚠ Receipt not verified — Confirm will <b>save a draft only</b>. Rooms are booked once the receipt is verified in the 🧾 Receipts panel.</div>":"";
       var bStyle="width:auto;display:inline-block;flex:0 0 auto";
-      var btns = (can&&hasHotel) ? ("<div style=\"margin-top:6px;display:flex;gap:8px;flex-wrap:wrap;align-items:center\">"+(conf>=total?"":"<button class=\"btn green sm\" style=\""+bStyle+"\" title=\"Confirm all free nights\" onclick=\"confirmAllCells('"+b.id+"')\">Confirm all</button>")+(conf>0?"<button class=\"btn gray sm\" style=\""+bStyle+"\" onclick=\"unconfirmAll('"+b.id+"')\">Unconfirm all</button>":"")+"</div>") : "";
+      var mainLabel=rcptOk?"Confirm all":"Save selection";
+      var btns=(can&&hasHotel)?("<div style=\"margin-top:6px;display:flex;gap:8px;flex-wrap:wrap;align-items:center\">"+"<button class=\"btn green sm\" style=\""+bStyle+"\" title=\""+(rcptOk?"Book all free nights":"Save all nights as draft")+"\" onclick=\"confirmAllCells('"+b.id+"')\">"+mainLabel+"</button>"+((selN>0||bkN>0)?"<button class=\"btn gray sm\" style=\""+bStyle+"\" onclick=\"unconfirmAll('"+b.id+"')\">Clear all</button>":"")+"</div>"):"";
       return "<div style=\"margin-top:6px;background:#fff;border:1px solid #e0d6c0;border-radius:8px;padding:8px 10px\">"
-        + "<div style=\"font-weight:700;color:#2f7d33\">🏠 Rooms & nights "+pill+"</div>"
-        + "<div style=\"margin:2px 0;font-size:.82em;color:#555\">Total <b>"+total+"</b> · <b style=\"color:#2f7d33\">"+foc+"</b> FOC (free) · <b style=\"color:#2a6fb0\">"+paid+"</b> paid · <b>"+conf+"</b>/<b>"+total+"</b> confirmed</div>"
-        + hint + needHotel + lines + btns + "</div>";
+        +"<div style=\"font-weight:700;color:#2f7d33\">🏠 Rooms & nights "+pill+"</div>"
+        +"<div style=\"margin:2px 0;font-size:.82em;color:#555\">Total <b>"+total+"</b> · <b style=\"color:#2f7d33\">"+foc+"</b> FOC · <b style=\"color:#2a6fb0\">"+paid+"</b> paid · Selected <b>"+selN+"</b> · Booked <b>"+bkN+"</b>/<b>"+total+"</b></div>"
+        +hint+needHotel+rcptNote+lines+btns+"</div>";
     }
+function needsReceiptFor(b){ var gt=(b.guestType||'FR'); var isKindNoReceipt=(b.sevaPlan==='kind' && !b.receipt); return (gt==='FR') && !isKindNoReceipt; }
+function canBookNow(b,skip){ return !needsReceiptFor(b) || !!skip || !!b.donationVerified || !!b.confirmedWithoutReceipt; }
+function selSetOf(b){ return (b.confCells&&typeof b.confCells==='object')?b.confCells:{}; }
+function bookedSetOf(b){ if(b.bookedCells&&typeof b.bookedCells==='object'&&Object.keys(b.bookedCells).length) return b.bookedCells; if((b.status==='confirmed'||b.status==='part') && canBookNow(b) && b.confCells && typeof b.confCells==='object'){ return b.confCells; } return {}; }
+function selCount(b){ var cs=selSetOf(b); return Object.keys(cs).filter(function(k){return cs[k];}).length; }
+function bookedCount(b){ var cs=bookedSetOf(b); return Object.keys(cs).filter(function(k){return cs[k];}).length; }
+function distinctBookedRooms(b){ var cs=bookedSetOf(b); var rr={}; Object.keys(cs).forEach(function(k){ if(cs[k]) rr[k.split('-')[0]]=1; }); return Object.keys(rr).length; }
 function toggleFocCell(id,room,night){ const b=DB.bookings.find(x=>x.id===id); if(!b||!(isSuper()||isVcm())) return; const budget=((b.guestType||'FR')!=='FR')?1e9:focBudget(b); if(!b.focCells||typeof b.focCells!=='object'||!Object.keys(b.focCells).length){ const rc=rnCells(b); b.focCells={}; rc.cells.forEach(c=>{ if(c.foc) b.focCells[c.room+'-'+c.night]=true; }); } const key=room+'-'+night; if(b.focCells[key]){ delete b.focCells[key]; } else { if(Object.keys(b.focCells).length>=budget){ if(typeof toast==='function') toast('FOC budget full ('+budget+' room-nights). Increase FOC-eligible room-nights, or free another night first.'); return; } b.focCells[key]=true; } save(); render(); }
 function focRNBreak(b){ const rc=rnCells(b); const cells=rc.cells; if(!cells.length) return ''; const total=cells.length, foc=cells.filter(c=>c.foc).length, paid=total-foc; const canEdit=isSuper()||isVcm(); const byRoom={}; cells.forEach(c=>{ (byRoom[c.room]=byRoom[c.room]||[]).push(c); }); const lines=Object.keys(byRoom).map(ri=>{ const chips=byRoom[ri].map(c=>{ const col=c.foc?'#2f7d33':'#2a6fb0', bg=c.foc?'#e8f5e9':'#e8f1fb'; return `<span ${canEdit?`onclick="toggleFocCell('${b.id}',${c.room},${c.night})" `:''}style="${canEdit?'cursor:pointer;':''}display:inline-block;padding:1px 7px;margin:1px 2px;border-radius:6px;font-size:.78em;font-weight:600;border:1px solid ${col};background:${bg};color:${col}">N${c.night+1}: ${c.foc?'FOC':'Paid'}</span>`; }).join(''); return `<div style="margin:3px 0"><span style="font-size:.8em;color:#555">Room ${Number(ri)+1}:</span> ${chips}</div>`; }).join(''); return `<div style="margin-top:6px;background:#fff;border:1px solid #e3ddcf;border-radius:8px;padding:7px 10px"><div style="font-weight:700;color:#8a6d1a">\u{1F9EE} Room-nights by donation</div><div style="margin:2px 0">Total <b>${total}</b> → <b style="color:#2f7d33">${foc}</b> FOC (free)${rc.nonFR?' · guest category':''} · <b style="color:#2a6fb0">${paid}</b> paid</div>${canEdit?'<div style="font-size:.72em;color:#999;margin-bottom:2px">tap a night to switch FOC / Paid</div>':''}${lines}</div>`; }
 function focMarked(b){ const a=apprRooms(b); if(b.focApproved!=null||b.paidApproved!=null) return Math.min(a,Math.max(0,Number(b.focApproved)||0)); if((b.guestType||'FR')!=='FR') return a; return Math.min(a, focEligibleRooms(b)); }
@@ -1782,30 +1793,29 @@ function fixClosedHotel(id){ const b=DB.bookings.find(x=>x.id===id); if(!b)retur
   save(); render(); toast('Moved to Braj Nidhi — '+tp.type+' × '+tp.rooms); }
 function approveNoReceipt(id){ if(!isSuper()){ toast('Only the Super Admin can confirm without a verified receipt'); return; } approve(id,true); }
 function approve(id,skipReceipt){ const b=DB.bookings.find(x=>x.id===id); if(!b)return;
-  const h=DB.hotels.find(x=>x.id===b.hotel);
-  if(!h||!b.roomType||!b.rooms){ toast('Pick a hotel, room type and at least 1 room first'); return; }
-  const gt=(b.guestType||'FR');
-  const isKindNoReceipt=(b.sevaPlan==='kind' && !b.receipt);   // Kind Donor without a receipt — no verification needed
-  const needsReceipt=(gt==='FR') && !isKindNoReceipt;   // PR / Media / Volunteer and Kind Donors (no receipt) don't need a verified receipt
-  if(gt!=='FR' && !isSuper()){ toast((b.guestType)+' bookings can only be confirmed by the Super Admin'); return; }
-  if(needsReceipt && !skipReceipt && !b.donationVerified){ toast(b.receiptWrong?'Receipt is marked WRONG — devotee must correct it (or use “Confirm without receipt”)':'Cannot confirm — verify the donation receipt first in the 🧾 Receipts panel'); return; }
-  b.confirmedWithoutReceipt = !!(skipReceipt && needsReceipt && !b.donationVerified);
-  const roomObj=h.rooms.find(r=>r.type===b.roomType);
-  const oEnd=hotelOriginEnd(h,b.checkin,b.checkout);
-  if(oEnd===null){ toast(h.name+' is not available on '+fmtD(b.checkin)+' — pick another guest house'); return; }
-  const avail=freeRoomsForStay(h,b.roomType,b.checkin,oEnd,id);   // free for the nights this hotel covers (rest continues in Braj Nidhi)
-  if(avail<=0){ toast('No '+b.roomType+' room free at '+h.name+' for '+fmtD(b.checkin)+'→'+fmtD(oEnd)+' — pick another room type or hotel'); return; }
-  if(b.rooms>avail){ toast('Only '+avail+' '+b.roomType+' room(s) free at '+h.name+' for these dates — reduce rooms to '+avail); return; }
-  if((b.extraBeds||0)>0 && !h.extraBedding){ toast(h.name+' does not allow extra bedding — set extra beds to 0'); return; }
-  // Room allotment is NEVER blocked by a pending seva payment. Staff-collect bookings just show "Payment due"
-  // and Staff (GPP's Team) can collect it later. Auto-mark the channel as Staff when it's not the devotee's own.
-  if(needsReceipt && b.donation<DB.rules.freeMin && !b.sevaCollected && b.sevaPlan!=='devotee' && !b.sevaChannel){ b.sevaChannel='GPP'; }
-  b.confCells=allocCellsMap(b); syncConfStatus(b); save(); render();
-  const extraMsg=(b.extraBeds||0)>0?` + ${b.extraBeds} extra bed`:'';
-  const cts=hotelSendContacts(h.id);
-  const ctMsg=cts.length?' · contact '+cts.map(c=>c.name+' '+c.phone).join(', '):'';
-  toast('✓ Confirmed: '+h.name+' · '+b.roomType+' × '+b.rooms+extraMsg+ctMsg+" — Confirmation updated on devotee's portal"); }
-function setStatus(id,s){ var b=DB.bookings.find(function(x){return x.id===id;}); if(!b)return; b.status=s; if(s!=='confirmed'&&s!=='part') b.confCells={}; save(); render(); toast('Status: '+s+' — notification sent'); }
+      const h=DB.hotels.find(x=>x.id===b.hotel);
+      if(!h||!b.roomType||!b.rooms){ toast('Pick a hotel, room type and at least 1 room first'); return; }
+      const gt=(b.guestType||'FR');
+      const isKindNoReceipt=(b.sevaPlan==='kind' && !b.receipt);
+      const needsReceipt=(gt==='FR') && !isKindNoReceipt;
+      if(gt!=='FR' && !isSuper()){ toast((b.guestType)+' bookings can only be confirmed by the Super Admin'); return; }
+      const receiptPending = needsReceipt && !skipReceipt && !b.donationVerified;
+      b.confirmedWithoutReceipt = !!(skipReceipt && needsReceipt && !b.donationVerified);
+      const oEnd=hotelOriginEnd(h,b.checkin,b.checkout);
+      if(oEnd===null){ toast(h.name+' is not available on '+fmtD(b.checkin)+' — pick another guest house'); return; }
+      if((b.extraBeds||0)>0 && !h.extraBedding){ toast(h.name+' does not allow extra bedding — set extra beds to 0'); return; }
+      if(!b.confCells || typeof b.confCells!=='object' || !selCount(b)) b.confCells=allocCellsMap(b);
+      if(needsReceipt && b.donation<DB.rules.freeMin && !b.sevaCollected && b.sevaPlan!=='devotee' && !b.sevaChannel){ b.sevaChannel='GPP'; }
+      if(receiptPending){ b.bookedCells=b.bookedCells||{}; syncConfStatus(b); save(); render(); toast('💾 Saved as draft — selected nights are planned but NOT booked. Verify the receipt in the 🧾 Receipts panel, then press Confirm to book.'); return; }
+      const avail=freeRoomsForStay(h,b.roomType,b.checkin,oEnd,id);
+      if(avail<=0){ toast('No '+b.roomType+' room free at '+h.name+' for '+fmtD(b.checkin)+'→'+fmtD(oEnd)+' — pick another room type or hotel'); return; }
+      if(b.rooms>avail){ toast('Only '+avail+' '+b.roomType+' room(s) free at '+h.name+' for these dates — reduce rooms to '+avail); return; }
+      b.bookedCells=Object.assign({},selSetOf(b)); syncConfStatus(b); save(); render();
+      const extraMsg=(b.extraBeds||0)>0?` + ${b.extraBeds} extra bed`:'';
+      const cts=hotelSendContacts(h.id);
+      const ctMsg=cts.length?' · contact '+cts.map(c=>c.name+' '+c.phone).join(', '):'';
+      toast('✓ Confirmed: '+h.name+' · '+b.roomType+' × '+apprRooms(b)+extraMsg+ctMsg+" — Confirmation updated on devotee's portal"); }
+function setStatus(id,s){ var b=DB.bookings.find(function(x){return x.id===id;}); if(!b)return; if(s==='rejected'||s==='cancelled'||s==='withdrawn'){ b.confCells={}; b.bookedCells={}; } else if(s==='pending'||s==='waitlist'){ b.bookedCells={}; } b.status=s; save(); render(); toast('Status: '+s+' — notification sent'); }
 
 /* ---------------- Admin: Hotels ---------------- */
 function viewHotels(){
