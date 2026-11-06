@@ -398,7 +398,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b155';
+const APP_BUILD='2026-08-16-b156';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -1360,10 +1360,10 @@ function dateEditHTML(b){
   if(!(isSuper()||isVcm())) return dates?`<div class="muted" style="color:var(--saffron-dark)">${dates}</div>`:'';
   const eS=DB.rules.eventStart, lastIn=prevDay(DB.rules.eventEnd), eE=DB.rules.eventEnd;
   const stays=(b.stays&&b.stays.length)?b.stays:[{checkin:b.checkin,checkout:b.checkout}];
-  const rows=stays.map((s,i)=>`<span style="display:inline-flex;gap:4px;align-items:center;margin:2px 8px 2px 0">${stays.length>1?`<b>R${i+1}</b> `:''}<input type="date" value="${s.checkin||''}" min="${eS}" max="${lastIn}" onchange="setStayDate('${b.id}',${i},'checkin',this.value)" style="padding:2px 5px;font-size:12px"> → <input type="date" value="${s.checkout||''}" min="${s.checkin||eS}" max="${eE}" onchange="setStayDate('${b.id}',${i},'checkout',this.value)" style="padding:2px 5px;font-size:12px">${roomNightStatus(b,i)}</span>`).join('');
+  const rows=stays.map((s,i)=>`<span style="display:flex;gap:4px;align-items:center;margin:3px 0;flex-wrap:nowrap">${stays.length>1?`<b>R${i+1}</b> `:''}<input type="date" value="${s.checkin||''}" min="${eS}" max="${lastIn}" onchange="setStayDate('${b.id}',${i},'checkin',this.value)" style="padding:2px 4px;font-size:12px;flex:1 1 0;min-width:88px"> → <input type="date" value="${s.checkout||''}" min="${s.checkin||eS}" max="${eE}" onchange="setStayDate('${b.id}',${i},'checkout',this.value)" style="padding:2px 4px;font-size:12px;flex:1 1 0;min-width:88px">${roomNightStatus(b,i)}</span>`).join('');
   return `<div class="rooms-mini" style="margin-top:5px;color:var(--saffron-dark)">📅 <b>Stay dates</b> (editable): ${rows}</div>`;
 }
-function roomNightStatus(b,i){ var stays=(b.stays&&b.stays.length)?b.stays:[{checkin:b.checkin,checkout:b.checkout}]; var st=stays[i]||{checkin:b.checkin,checkout:b.checkout}; var n=stayNightsEx(st); if(!n) return ''; var bk=(typeof bookedSetOf==='function')?bookedSetOf(b):{}; var c=0; for(var ni=0;ni<n;ni++){ if(bk[i+'-'+ni]) c++; } var p=n-c; var parts=[]; if(c>0) parts.push('<b style="color:#2f7d33">'+c+' CFN</b>'); if(p>0) parts.push('<b style="color:#9a6b00">'+p+' pndng</b>'); return parts.length?(' <span style="font-size:.82em;color:#777">· '+parts.join(' · ')+'</span>'):''; }
+function roomNightStatus(b,i){ var stays=(b.stays&&b.stays.length)?b.stays:[{checkin:b.checkin,checkout:b.checkout}]; var st=stays[i]||{checkin:b.checkin,checkout:b.checkout}; var n=stayNightsEx(st); if(!n) return ''; var bk=(typeof bookedSetOf==='function')?bookedSetOf(b):{}; var c=0; for(var ni=0;ni<n;ni++){ if(bk[i+'-'+ni]) c++; } var p=n-c; var parts=[]; if(c>0) parts.push('<b style="color:#2f7d33">'+c+' CFN</b>'); if(p>0) parts.push('<b style="color:#9a6b00">'+p+' pndng</b>'); return parts.length?(' <span style="font-size:.78em;color:#777;white-space:nowrap">· '+parts.join(' · ')+'</span>'):''; }
 function setStayDate(id,i,which,val){ const b=DB.bookings.find(x=>x.id===id); if(!b || !(isSuper()||isVcm())) return;
   const eS=DB.rules.eventStart, eE=DB.rules.eventEnd, lastIn=prevDay(eE);
   if(!(b.stays&&b.stays.length)) b.stays=[{checkin:b.checkin,checkout:b.checkout,extra:(b.extraRequested>0)}];
