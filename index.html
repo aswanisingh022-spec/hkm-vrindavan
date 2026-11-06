@@ -398,7 +398,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b146';
+const APP_BUILD='2026-08-16-b147';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -1623,7 +1623,7 @@ function viewBraj(){
 }
 function stepRooms(id,delta){ const b=DB.bookings.find(x=>x.id===id); if(!b)return;
   const wasConfirmed=b.status==='confirmed'; const oldRooms=b.rooms||0;
-  b.rooms=Math.max(0,(b.rooms||0)+delta); b.roomPlan=null;
+  { const reqMax=Math.max(1,Number(b.roomsRequested)||1); const want=Math.max(0,(b.rooms||0)+delta); if(delta>0 && want>reqMax){ if(typeof toast==='function') toast('Max is '+reqMax+' room(s) — the number requested'); return; } b.rooms=Math.min(reqMax,want); } b.roomPlan=null;
   if(wasConfirmed && (isSuper()||isVcm()) && b.rooms!==oldRooms) markEdited(b,'Rooms: '+oldRooms+' → '+b.rooms);
   save(); render(); }
 function toggleSeva(id){ const b=DB.bookings.find(x=>x.id===id); if(!b)return; b.sevaCollected=!b.sevaCollected;
@@ -1801,11 +1801,11 @@ function setField(id,f,v){ const b=DB.bookings.find(x=>x.id===id); if(!b)return;
   const wasConfirmed=b.status==='confirmed';
   const isTransfer=(f==='transferRoomType'||f==='transferRooms');
   const oldV = (f==='hotel') ? b.hotel : ((f==='transferRoomType'||f==='transferRooms') ? transferPlan(b)[f==='transferRoomType'?'type':'rooms'] : b[f]);
-  if(f==='rooms'||f==='extraBeds'||f==='transferRooms') b[f]=Math.max(0,parseInt(v)||0); else b[f]=v;
+  if(f==='rooms') b.rooms=Math.min(Math.max(1,Number(b.roomsRequested)||1),Math.max(0,parseInt(v)||0)); else if(f==='extraBeds'||f==='transferRooms') b[f]=Math.max(0,parseInt(v)||0); else b[f]=v;
   if(!isTransfer) b.roomPlan=null;   // manual edit overrides any multi-room auto plan (origin fields only)
   if(f==='hotel'){ b.roomType=''; b.rooms=0; b.extraBeds=0; }
   if(f==='roomType'){ const h=DB.hotels.find(x=>x.id===b.hotel); const r=h&&h.rooms.find(x=>x.type===v);
-    if(r&&(!b.rooms||b.rooms<1)) b.rooms=Math.ceil(b.count/r.cap); }  // auto-fill rooms needed
+    if(r&&(!b.rooms||b.rooms<1)) b.rooms=Math.min(Math.max(1,Number(b.roomsRequested)||1),Math.ceil(b.count/r.cap)); }  // auto-fill rooms needed
   if(f==='transferRoomType'){ const r=brajRoomsList().find(x=>x.type===v); if(r) b.transferRooms=Math.max(1,Math.ceil((b.count||1)/r.cap)); }  // auto-fill Braj Nidhi rooms
   const newV = (f==='hotel') ? b.hotel : ((f==='transferRoomType'||f==='transferRooms') ? transferPlan(b)[f==='transferRoomType'?'type':'rooms'] : b[f]);
   if(wasConfirmed && (isSuper()||isVcm()) && String(oldV)!==String(newV)) markEdited(b, fieldLabel(f)+': '+fieldVal(f,oldV)+' → '+fieldVal(f,newV));
