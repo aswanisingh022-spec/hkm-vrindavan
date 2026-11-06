@@ -398,7 +398,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b140';
+const APP_BUILD='2026-08-16-b141';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -1686,8 +1686,7 @@ function roomNightPanel(b){
         var chips=byRoom[ri].map(function(c){
           var k=c.room+'-'+c.night; var isSel=!!sel[k], isBk=!!bk[k];
           var cCol,cBg,cBd,mark;
-          if(isBk){ cCol='#2f7d33'; cBg='#e8f5e9'; cBd='#8cc591'; mark='✓ '; }
-          else if(isSel){ cCol='#9a6b00'; cBg='#fff6e5'; cBd='#e6c77a'; mark='✓ '; }
+          if(isSel){ cCol='#2f7d33'; cBg='#e8f5e9'; cBd='#8cc591'; mark='✓ '; }
           else { cCol='#777'; cBg='#f4f2ec'; cBd='#dcd6c6'; mark=''; }
           var pCol=c.foc?'#2f7d33':'#2a6fb0', pBg=c.foc?'#d8efdb':'#dcebfb';
           var confAttr=(can&&hasHotel)?("onclick=\"toggleConfCell('"+b.id+"',"+c.room+","+c.night+")\" style=\"cursor:pointer;"):"style=\"";
@@ -1698,7 +1697,7 @@ function roomNightPanel(b){
         return "<div style=\"margin:3px 0\"><span style=\"font-size:.8em;color:#555\">Room "+(Number(ri)+1)+":</span> "+chips+dlab+"</div>";
       }).join("");
       var pill = bkN>0 ? (bkN>=total?"<span class=\"pill p-confirmed\">fully confirmed</span>":"<span class=\"pill p-edited\">partly confirmed</span>") : (selN>0?"<span class=\"pill p-waitlist\">saved · pending receipt</span>":"<span class=\"pill p-pending\">nothing selected</span>");
-      var hint=(can&&hasHotel)?"<div style=\"font-size:.72em;color:#999;margin:2px 0 3px\">Tap a night to select · tap the FOC / Paid badge to switch price</div>":"";
+      var hint=(can&&hasHotel)?"<div style=\"font-size:.72em;color:#999;margin:2px 0 3px\">Tap a night to select (turns green) · tap the FOC / Paid badge to switch price</div>":"";
       var needHotel=(can&&!hasHotel)?"<div style=\"font-size:.74em;color:#b26a00;margin:2px 0\">Pick a hotel & room type above, then tap nights to select</div>":"";
       var rcptNote=(can&&hasHotel&&rcptNeeded&&!rcptOk)?"<div style=\"font-size:.74em;color:#b26a00;background:#fff6e5;border:1px solid #e6c77a;border-radius:6px;padding:4px 7px;margin:3px 0\">⚠ Receipt not verified — Confirm will <b>save a draft only</b>. Rooms are booked once the receipt is verified in the 🧾 Receipts panel.</div>":"";
       var bStyle="width:auto;display:inline-block;flex:0 0 auto";
