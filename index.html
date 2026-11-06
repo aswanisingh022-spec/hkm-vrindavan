@@ -398,7 +398,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b153';
+const APP_BUILD='2026-08-16-b154';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -1687,7 +1687,7 @@ function roomNightPanel(b){
       var lines=roomKeys.map(function(ri){
         var group=byRoom[ri]||[];
         var st=roomStayOf(b,ri);
-        var typeOpts = hotel ? hotel.rooms.map(function(rt){ var free=roomFreeForStay(b,hotel,rt.type,ri); return '<option value="'+rt.type+'"'+(roomTypeOf(b,ri)===rt.type?' selected':'')+'>'+rt.type+' · '+free+' free</option>'; }).join('') : '';
+        var typeOpts = hotel ? hotel.rooms.map(function(rt){ var free=roomFreeForStay(b,hotel,rt.type,ri); return '<option value="'+rt.type+'"'+(roomTypeOf(b,ri)===rt.type?' selected':'')+((free<=0 && roomTypeOf(b,ri)!==rt.type)?' disabled':'')+(free<=0?' style="color:#b23b32"':'')+'>'+rt.type+' · '+free+' free'+(free<=0?' — full':'')+'</option>'; }).join('') : '';
         var typeSel = (can&&hotel) ? ('<select onclick="event.stopPropagation()" onchange="setRoomType(\''+b.id+'\','+ri+',this.value)" style="font-size:.74em;padding:1px 4px;margin:0 5px;border-radius:5px"><option value="">type…</option>'+typeOpts+'</select>') : (roomTypeOf(b,ri)?(' <span style="font-size:.74em;color:#2a6fb0;font-weight:700">'+esc(roomTypeOf(b,ri))+'</span> '):' ');
         var chips=group.map(function(c){
           var k=c.room+'-'+c.night; var isSel=!!sel[k], isBk=!!bk[k];
