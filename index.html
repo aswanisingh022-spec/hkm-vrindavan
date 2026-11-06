@@ -398,7 +398,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b143';
+const APP_BUILD='2026-08-16-b144';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -2225,9 +2225,7 @@ function viewReceipts(){
       <td>${esc(devoteeName(b))}</td>
       <td>${seeMoney()?money(b.donation):catBadge(b)}</td>
       <td><span class="rcp-copy" onclick="copyReceipt('${b.id}')" title="Click to copy — or select the text">${esc(b.receipt)}</span></td>
-      <td>${(isSuper()||isAccounts())
-          ? `<select onchange="setDonFest('${b.id}',this.value)" style="width:auto;padding:2px 6px;font-size:12px" title="Correct the occasion if the receipt shows a discrepancy"><option value="JM" ${b.donFest!=='RA'?'selected':''}>JNM (Janmashtami)</option><option value="RA" ${b.donFest==='RA'?'selected':''}>RA (Radha Ashtami)</option></select>`
-          : donFestBadge(b)}</td>
+      <td><span class="pill p-pending">Kartik Festival</span></td>
       <td>${b.receiptWrong?'<span class="pill p-rejected">✗ Wrong</span>':(b.donationVerified?'<span class="pill p-confirmed">Verified</span>':'<span class="pill p-pending">Unverified</span>')}</td>
       <td>${!canVerify
           ? `<button class="btn gray sm" disabled style="opacity:.45;cursor:not-allowed" title="Locked by Super Admin">✓ Verify</button>`
