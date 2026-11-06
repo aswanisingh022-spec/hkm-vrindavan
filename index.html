@@ -398,7 +398,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b147';
+const APP_BUILD='2026-08-16-b148';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -1348,7 +1348,7 @@ function allocCell(b){
        </select></div>`; }
   return `<div class="alloc">
       <select class="a-sel" onchange="setField('${b.id}','hotel',this.value)"><option value="">— select hotel —</option>${hotelSel}</select>
-      <select class="a-sel" onchange="setField('${b.id}','roomType',this.value)"><option value="">— select room type —</option>${rtypes}</select>
+      
       <div class="a-row"><span class="a-lbl">Rooms</span>
         <div class="stepper"><button onclick="stepRooms('${b.id}',-1)">−</button><input type="number" min="0" value="${b.rooms||0}" onchange="setField('${b.id}','rooms',this.value)"><button onclick="stepRooms('${b.id}',1)">+</button></div>
         ${extraCtl}</div>
@@ -1686,7 +1686,8 @@ function roomNightPanel(b){
       var roomKeys=[]; for(var i=0;i<nRooms;i++) roomKeys.push(i);
       var lines=roomKeys.map(function(ri){
         var group=byRoom[ri]||[];
-        var typeOpts = hotel ? hotel.rooms.map(function(rt){ return '<option value="'+rt.type+'"'+(roomTypeOf(b,ri)===rt.type?' selected':'')+'>'+rt.type+'</option>'; }).join('') : '';
+        var st=roomStayOf(b,ri);
+        var typeOpts = hotel ? hotel.rooms.map(function(rt){ var free=(typeof freeRoomsForStay==='function')?freeRoomsForStay(hotel,rt.type,st.checkin,st.checkout,b.id):''; return '<option value="'+rt.type+'"'+(roomTypeOf(b,ri)===rt.type?' selected':'')+'>'+rt.type+(free!==''?(' · '+free+' free'):'')+'</option>'; }).join('') : '';
         var typeSel = (can&&hotel) ? ('<select onclick="event.stopPropagation()" onchange="setRoomType(\''+b.id+'\','+ri+',this.value)" style="font-size:.74em;padding:1px 4px;margin:0 5px;border-radius:5px"><option value="">type…</option>'+typeOpts+'</select>') : (roomTypeOf(b,ri)?(' <span style="font-size:.74em;color:#2a6fb0;font-weight:700">'+esc(roomTypeOf(b,ri))+'</span> '):' ');
         var chips=group.map(function(c){
           var k=c.room+'-'+c.night; var isSel=!!sel[k];
@@ -1698,7 +1699,7 @@ function roomNightPanel(b){
           var priceAttr=can?("onclick=\"event.stopPropagation();toggleFocCell('"+b.id+"',"+c.room+","+c.night+")\" title=\"switch FOC / Paid\" style=\"cursor:pointer;"):"style=\"";
           return "<span "+confAttr+"display:inline-flex;align-items:center;gap:5px;padding:2px 6px 2px 9px;margin:2px;border-radius:8px;font-size:.78em;font-weight:700;border:1px solid "+cBd+";background:"+cBg+";color:"+cCol+"\">"+mark+"N"+(c.night+1)+"<span "+priceAttr+"padding:0 6px;border-radius:5px;font-size:.92em;font-weight:700;border:1px solid "+pCol+";background:"+pBg+";color:"+pCol+"\">"+(c.foc?"FOC":"Paid")+"</span></span>";
         }).join("");
-        var st=roomStayOf(b,ri); var dlab=st?(" <span style=\"font-size:.72em;color:#888\">("+fmtD(st.checkin)+"→"+fmtD(st.checkout)+")</span>"):"";
+        var dlab=st?(" <span style=\"font-size:.72em;color:#888\">("+fmtD(st.checkin)+"→"+fmtD(st.checkout)+")</span>"):"";
         return "<div style=\"margin:4px 0\"><span style=\"font-size:.8em;color:#555\">Room "+(Number(ri)+1)+":</span>"+typeSel+chips+dlab+"</div>";
       }).join("");
       var pill = bkN>0 ? (bkN>=total?"<span class=\"pill p-confirmed\">fully confirmed</span>":"<span class=\"pill p-edited\">partly confirmed</span>") : (selN>0?"<span class=\"pill p-waitlist\">saved · pending receipt</span>":"<span class=\"pill p-pending\">nothing selected</span>");
@@ -1744,7 +1745,7 @@ function allocSummaryCard(list){
 function selectAllCells(id){ var b=DB.bookings.find(function(x){return x.id===id;}); if(!b||!(isSuper()||isVcm())) return; var h=DB.hotels.find(function(x){return x.id===b.hotel;}); if(!h){ if(typeof toast==='function') toast('Pick a hotel first'); return; } if(!b.confCells||typeof b.confCells!=='object') b.confCells=Object.assign({},selSetOf(b)); var cells=rnCells(b).cells; var blocked=0, notype=0; cells.forEach(function(c){ var key=c.room+'-'+c.night; if(b.confCells[key]) return; if(!c.type){ notype++; return; } var st=roomStayOf(b,c.room); var d=cellDate(st,c.night); var free=roomCapOnNight(h,c.type,d)-roomsUsedOnNight(h.id,c.type,d,b.id); if(free>0){ b.confCells[key]=true; } else blocked++; }); syncConfStatus(b); save(); render(); if(typeof toast==='function') toast('Selected free nights'+(blocked?' · '+blocked+' full':'')+(notype?' · '+notype+' need a room type':'')); }
 function allocRoomCount(b){ var n=Math.max(0,Number(b.rooms)||0); if(n>0) return n; if(b.stays&&b.stays.length) return b.stays.length; return b.checkin?1:0; }
 function roomStayOf(b,ri){ var l=(b.stays&&b.stays.length)?b.stays:[]; if(ri<l.length) return l[ri]; return {checkin:(b.checkin||DB.rules.eventStart), checkout:(b.checkout||DB.rules.eventEnd)}; }
-function roomTypeOf(b,ri){ return (b.roomTypes&&b.roomTypes[ri])||b.roomType||''; }
+function roomTypeOf(b,ri){ if(b.roomTypes && b.roomTypes[ri]) return b.roomTypes[ri]; if(b.roomType) return b.roomType; var h=DB.hotels.find(function(x){return x.id===b.hotel;}); return (h&&h.rooms&&h.rooms[0])?h.rooms[0].type:''; }
 function setRoomType(id,ri,type){ var b=DB.bookings.find(function(x){return x.id===id;}); if(!b||!(isSuper()||isVcm())) return; b.roomTypes=b.roomTypes||{}; b.roomTypes[ri]=type; save(); render(); }
 function toggleFocCell(id,room,night){ const b=DB.bookings.find(x=>x.id===id); if(!b||!(isSuper()||isVcm())) return; const budget=((b.guestType||'FR')!=='FR')?1e9:focBudget(b); if(!b.focCells||typeof b.focCells!=='object'||!Object.keys(b.focCells).length){ const rc=rnCells(b); b.focCells={}; rc.cells.forEach(c=>{ if(c.foc) b.focCells[c.room+'-'+c.night]=true; }); } const key=room+'-'+night; if(b.focCells[key]){ delete b.focCells[key]; } else { if(Object.keys(b.focCells).length>=budget){ if(typeof toast==='function') toast('FOC budget full ('+budget+' room-nights). Increase FOC-eligible room-nights, or free another night first.'); return; } b.focCells[key]=true; } save(); render(); }
 function focRNBreak(b){ const rc=rnCells(b); const cells=rc.cells; if(!cells.length) return ''; const total=cells.length, foc=cells.filter(c=>c.foc).length, paid=total-foc; const canEdit=isSuper()||isVcm(); const byRoom={}; cells.forEach(c=>{ (byRoom[c.room]=byRoom[c.room]||[]).push(c); }); const lines=Object.keys(byRoom).map(ri=>{ const chips=byRoom[ri].map(c=>{ const col=c.foc?'#2f7d33':'#2a6fb0', bg=c.foc?'#e8f5e9':'#e8f1fb'; return `<span ${canEdit?`onclick="toggleFocCell('${b.id}',${c.room},${c.night})" `:''}style="${canEdit?'cursor:pointer;':''}display:inline-block;padding:1px 7px;margin:1px 2px;border-radius:6px;font-size:.78em;font-weight:600;border:1px solid ${col};background:${bg};color:${col}">N${c.night+1}: ${c.foc?'FOC':'Paid'}</span>`; }).join(''); return `<div style="margin:3px 0"><span style="font-size:.8em;color:#555">Room ${Number(ri)+1}:</span> ${chips}</div>`; }).join(''); return `<div style="margin-top:6px;background:#fff;border:1px solid #e3ddcf;border-radius:8px;padding:7px 10px"><div style="font-weight:700;color:#8a6d1a">\u{1F9EE} Room-nights by donation</div><div style="margin:2px 0">Total <b>${total}</b> → <b style="color:#2f7d33">${foc}</b> FOC (free)${rc.nonFR?' · guest category':''} · <b style="color:#2a6fb0">${paid}</b> paid</div>${canEdit?'<div style="font-size:.72em;color:#999;margin-bottom:2px">tap a night to switch FOC / Paid</div>':''}${lines}</div>`; }
@@ -1803,7 +1804,7 @@ function setField(id,f,v){ const b=DB.bookings.find(x=>x.id===id); if(!b)return;
   const oldV = (f==='hotel') ? b.hotel : ((f==='transferRoomType'||f==='transferRooms') ? transferPlan(b)[f==='transferRoomType'?'type':'rooms'] : b[f]);
   if(f==='rooms') b.rooms=Math.min(Math.max(1,Number(b.roomsRequested)||1),Math.max(0,parseInt(v)||0)); else if(f==='extraBeds'||f==='transferRooms') b[f]=Math.max(0,parseInt(v)||0); else b[f]=v;
   if(!isTransfer) b.roomPlan=null;   // manual edit overrides any multi-room auto plan (origin fields only)
-  if(f==='hotel'){ b.roomType=''; b.rooms=0; b.extraBeds=0; }
+  if(f==='hotel'){ b.roomType=''; b.rooms=Math.max(1,Number(b.roomsRequested)||1); b.extraBeds=0; b.roomTypes={}; }
   if(f==='roomType'){ const h=DB.hotels.find(x=>x.id===b.hotel); const r=h&&h.rooms.find(x=>x.type===v);
     if(r&&(!b.rooms||b.rooms<1)) b.rooms=Math.min(Math.max(1,Number(b.roomsRequested)||1),Math.ceil(b.count/r.cap)); }  // auto-fill rooms needed
   if(f==='transferRoomType'){ const r=brajRoomsList().find(x=>x.type===v); if(r) b.transferRooms=Math.max(1,Math.ceil((b.count||1)/r.cap)); }  // auto-fill Braj Nidhi rooms
