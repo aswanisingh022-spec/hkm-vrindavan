@@ -398,7 +398,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b152';
+const APP_BUILD='2026-08-16-b153';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -1690,11 +1690,12 @@ function roomNightPanel(b){
         var typeOpts = hotel ? hotel.rooms.map(function(rt){ var free=roomFreeForStay(b,hotel,rt.type,ri); return '<option value="'+rt.type+'"'+(roomTypeOf(b,ri)===rt.type?' selected':'')+'>'+rt.type+' · '+free+' free</option>'; }).join('') : '';
         var typeSel = (can&&hotel) ? ('<select onclick="event.stopPropagation()" onchange="setRoomType(\''+b.id+'\','+ri+',this.value)" style="font-size:.74em;padding:1px 4px;margin:0 5px;border-radius:5px"><option value="">type…</option>'+typeOpts+'</select>') : (roomTypeOf(b,ri)?(' <span style="font-size:.74em;color:#2a6fb0;font-weight:700">'+esc(roomTypeOf(b,ri))+'</span> '):' ');
         var chips=group.map(function(c){
-          var k=c.room+'-'+c.night; var isSel=!!sel[k];
+          var k=c.room+'-'+c.night; var isSel=!!sel[k], isBk=!!bk[k];
           var cCol,cBg,cBd,mark;
-          if(!isSel){ cCol='#2a6fb0'; cBg='#dcecfb'; cBd='#a9cdee'; mark=''; }
-          else if(c.foc){ cCol='#2f7d33'; cBg='#e8f5e9'; cBd='#8cc591'; mark='✓ '; }
-          else { cCol='#b23b32'; cBg='#fbe1dd'; cBd='#e3a9a2'; mark='✓ '; }
+          if(isBk && c.foc){ cCol='#2f7d33'; cBg='#e8f5e9'; cBd='#8cc591'; mark='✓ '; }
+          else if(isBk){ cCol='#b23b32'; cBg='#fbe1dd'; cBd='#e3a9a2'; mark='✓ '; }
+          else if(isSel){ cCol='#9a6b00'; cBg='#fff6e5'; cBd='#e6c77a'; mark='○ '; }
+          else { cCol='#2a6fb0'; cBg='#dcecfb'; cBd='#a9cdee'; mark=''; }
           var pCol=c.foc?'#2f7d33':'#c0392b', pBg=c.foc?'#d8efdb':'#f6cfc9';
           var confAttr=(can&&hasHotel&&roomTypeOf(b,ri))?("onclick=\"toggleConfCell('"+b.id+"',"+c.room+","+c.night+")\" style=\"cursor:pointer;"):"style=\"";
           var priceAttr=can?("onclick=\"event.stopPropagation();toggleFocCell('"+b.id+"',"+c.room+","+c.night+")\" title=\"switch FOC / Paid\" style=\"cursor:pointer;"):"style=\"";
@@ -1704,7 +1705,7 @@ function roomNightPanel(b){
         return "<div style=\"margin:4px 0\"><span style=\"font-size:.8em;color:#555\">Room "+(Number(ri)+1)+":</span>"+typeSel+chips+dlab+"</div>";
       }).join("");
       var pill = bkN>0 ? (bkN>=total?"<span class=\"pill p-confirmed\">fully confirmed</span>":"<span class=\"pill p-edited\">partly confirmed</span>") : (selN>0?"<span class=\"pill p-waitlist\">saved · pending receipt</span>":"<span class=\"pill p-pending\">nothing selected</span>");
-      var hint=(can&&hasHotel)?("<div style=\"font-size:.72em;color:#999;margin:2px 0 3px\">Pick each room’s type, tap a night to select · <span onclick=\"selectAllCells('"+b.id+"')\" style=\"cursor:pointer;color:#2a6fb0;text-decoration:underline\">select all free nights</span> · green=FOC, red=Paid (tap the badge to switch)</div>"):"";
+      var hint=(can&&hasHotel)?("<div style=\"font-size:.72em;color:#999;margin:2px 0 3px\">○ selected (not booked) · ✓ green=booked FOC · ✓ red=booked Paid · blue=free. <span onclick=\"selectAllCells('"+b.id+"')\" style=\"cursor:pointer;color:#2a6fb0;text-decoration:underline\">select all free nights</span> · tap the badge to switch FOC/Paid</div>"):"";
       var needHotel=(can&&!hasHotel)?"<div style=\"font-size:.74em;color:#b26a00;margin:2px 0\">Pick a hotel above, then set each room’s type & nights</div>":"";
       var rcptNote=(can&&hasHotel&&rcptNeeded&&!rcptOk)?"<div style=\"font-size:.74em;color:#b26a00;background:#fff6e5;border:1px solid #e6c77a;border-radius:6px;padding:4px 7px;margin:3px 0\">⚠ Receipt not verified — Save keeps a draft only. Rooms are booked once the receipt is verified in the 🧾 Receipts panel.</div>":"";
       var bStyle="width:auto;display:inline-block;flex:0 0 auto";
