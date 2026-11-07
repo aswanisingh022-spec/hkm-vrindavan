@@ -398,7 +398,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b158';
+const APP_BUILD='2026-08-16-b159';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -1697,7 +1697,7 @@ function roomNightPanel(b){
           else if(isBk){ cCol='#b23b32'; cBg='#fbe1dd'; cBd='#e3a9a2'; mark='✓ '; }
           else if(isSel){ cCol='#9a6b00'; cBg='#fff6e5'; cBd='#e6c77a'; mark='○ '; }
           else { cCol='#666'; cBg='#ffffff'; cBd='#d9d2c2'; mark=''; }
-          var pCol=c.foc?'#2f7d33':'#c0392b', pBg=c.foc?'#d8efdb':'#f6cfc9';
+          var pCol=c.foc?'#2f7d33':'#c0392b', pBg=isSel?(c.foc?'#d8efdb':'#f6cfc9'):'#ffffff';
           var confAttr=(can&&hasHotel&&roomTypeOf(b,ri))?("onclick=\"toggleConfCell('"+b.id+"',"+c.room+","+c.night+")\" style=\"cursor:pointer;"):"style=\"";
           var priceAttr=can?("onclick=\"event.stopPropagation();toggleFocCell('"+b.id+"',"+c.room+","+c.night+")\" title=\"switch FOC / Paid\" style=\"cursor:pointer;"):"style=\"";
           return "<span "+confAttr+"display:inline-flex;align-items:center;gap:5px;padding:2px 6px 2px 9px;margin:2px;border-radius:8px;font-size:.78em;font-weight:700;border:1px solid "+cBd+";background:"+cBg+";color:"+cCol+"\">"+mark+"N"+(c.night+1)+"<span "+priceAttr+"padding:0 6px;border-radius:5px;font-size:.92em;font-weight:700;border:1px solid "+pCol+";background:"+pBg+";color:"+pCol+"\">"+(c.foc?"FOC":"Paid")+"</span></span>";
