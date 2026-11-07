@@ -398,7 +398,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b162';
+const APP_BUILD='2026-08-16-b163';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -2104,30 +2104,21 @@ function toggleContactSend(id,i){ const h=DB.hotels.find(x=>x.id===id); const c=
 
 /* ---------------- Admin: Vacancy & Unassigned ---------------- */
 function viewVacancy(){
-  const vacCards=hotelsByPriority().filter(h=>h.active).map(h=>{
-    const rows=h.rooms.map(r=>{ const used=peakRoomsUsed(h.id,r.type), vac=Math.max(0,r.count-used);
-      return `<tr><td>${esc(r.type)}</td><td>${r.count}</td><td>${used}</td>
-        <td><b style="color:${vac>0?'var(--green)':'var(--red)'}">${vac}</b></td>
-        <td>${vac*r.cap} beds</td></tr>`; }).join('');
-    const totVac=h.rooms.reduce((s,r)=>s+Math.max(0,r.count-peakRoomsUsed(h.id,r.type)),0);
-    return `<div class="card"><h2 class="section" style="margin:0 0 6px">🛏️ ${esc(h.name)}
-        <span class="pill ${totVac>0?'p-confirmed':'p-rejected'}">${totVac} rooms free</span></h2>
-      <table><thead><tr><th>Room type</th><th>Total</th><th>Used</th><th>Vacant</th><th>Free beds</th></tr></thead>
-        <tbody>${rows||'<tr><td colspan="5" class="muted">No rooms</td></tr>'}</tbody></table></div>`;
-  }).join('');
-  const un=unassignedBookings();
-  const unRows=un.map(b=>`<tr>
-    <td><b>${headLabel(b)}</b><div class="muted">${peopleLabel(b)} · by ${esc(devoteeName(b))}</div></td>
-    <td>${donDisplay(b)}</td><td>${statusPill(b.status)}</td>
-    <td>${b.preferred&&b.preferred.length?esc(b.preferred.map(hotelName).join(', ')):'—'}</td>
-    <td><button class="btn sm" onclick="go('requests')">Assign →</button></td></tr>`).join('');
-  const unCard=`<div class="card"><h2 class="section">🕗 Unassigned People
-      <span class="pill p-pending">${un.length} pending</span></h2>
-    <p class="subhead">Guests not yet given a confirmed hotel. Total people waiting: ${un.reduce((s,b)=>s+b.count,0)}.</p>
-    <table><thead><tr><th>Guest</th><th>Donation</th><th>Status</th><th>Preferred</th><th></th></tr></thead>
-      <tbody>${unRows||'<tr><td colspan="5" class="muted">Everyone is assigned 🎉</td></tr>'}</tbody></table></div>`;
-  return unCard+`<h2 class="section" style="margin:6px 2px">Vacant rooms by hotel</h2>`+vacCards;
-}
+      var eS=DB.rules.eventStart, eE=DB.rules.eventEnd, lastIn=prevDay(eE);
+      var dsel=(typeof availDate!=='undefined' && availDate)?availDate:'';
+      var usedOf=function(hid,type){ return dsel?roomsUsedOnNight(hid,type,dsel):peakRoomsUsed(hid,type); };
+      var vacCards=hotelsByPriority().filter(function(h){return h.active;}).map(function(h){
+        var rows=h.rooms.map(function(r){ var used=usedOf(h.id,r.type), vac=Math.max(0,r.count-used);
+          return '<tr><td>'+esc(r.type)+'</td><td>'+r.count+'</td><td>'+used+'</td><td><b style="color:'+(vac>0?'var(--green)':'var(--red)')+'">'+vac+'</b></td><td>'+(vac*r.cap)+' beds</td></tr>'; }).join('');
+        var totVac=h.rooms.reduce(function(s,r){return s+Math.max(0,r.count-usedOf(h.id,r.type));},0);
+        return '<div class="card"><h2 class="section" style="margin:0 0 6px">🛏️ '+esc(h.name)+' <span class="pill '+(totVac>0?'p-confirmed':'p-rejected')+'">'+totVac+' rooms free</span></h2><table><thead><tr><th>Room type</th><th>Total</th><th>'+(dsel?'Booked':'Used (peak)')+'</th><th>Vacant</th><th>Free beds</th></tr></thead><tbody>'+(rows||'<tr><td colspan="5" class="muted">No rooms</td></tr>')+'</tbody></table></div>';
+      }).join('');
+      var un=unassignedBookings();
+      var unRows=un.map(function(b){ return '<tr><td><b>'+headLabel(b)+'</b><div class="muted">'+peopleLabel(b)+' · by '+esc(devoteeName(b))+'</div></td><td>'+donDisplay(b)+'</td><td>'+statusPill(b.status)+'</td><td>'+(b.preferred&&b.preferred.length?esc(b.preferred.map(hotelName).join(', ')):'—')+'</td><td><button class="btn sm" onclick="go(\'requests\')">Assign →</button></td></tr>'; }).join('');
+      var unCard='<div class="card"><h2 class="section">🕗 Unassigned People <span class="pill p-pending">'+un.length+' pending</span></h2><p class="subhead">Guests not yet given a confirmed hotel. Total people waiting: '+un.reduce(function(s,b){return s+b.count;},0)+'.</p><table><thead><tr><th>Guest</th><th>Donation</th><th>Status</th><th>Preferred</th><th></th></tr></thead><tbody>'+(unRows||'<tr><td colspan="5" class="muted">Everyone is assigned 🎉</td></tr>')+'</tbody></table></div>';
+      var dateBar='<div class="card" style="padding:10px 14px"><span style="font-weight:700;color:#8a6d1a">📅 Vacancy on: </span><input type="date" value="'+dsel+'" min="'+eS+'" max="'+lastIn+'" onchange="setAvailDate(this.value)" style="padding:3px 7px;font-size:13px"> '+(dsel?('<button class="btn gray sm" style="width:auto" onclick="setAvailDate(\'\')">Show peak (all nights)</button> <span style="color:#555;font-size:.9em">Rooms free on the night of '+fmtD(dsel)+'</span>'):'<span style="color:#555;font-size:.9em">Showing peak usage across all nights — pick a date to see that night’s vacancy</span>')+'</div>';
+      return unCard+dateBar+'<h2 class="section" style="margin:6px 2px">Vacant rooms by hotel'+(dsel?(' — '+fmtD(dsel)):'')+'</h2>'+vacCards;
+    }
 
 /* ---------------- Admin: Excel Export ---------------- */
 function bookingRow(b){ const t=raTier(b); const loc=b.hotel?hotelsTextForBooking(b):'Not allocated'; return {
