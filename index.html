@@ -398,7 +398,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b160';
+const APP_BUILD='2026-08-16-b161';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -1485,7 +1485,7 @@ function toggleBookedShort(){ bookedShortOnly=!bookedShortOnly; render(); }
 function bookedFulfilStatus(b){ var tot=(typeof reqCellCount==='function')?reqCellCount(b):0; var bk=(typeof bookedCount==='function')?bookedCount(b):0; if(tot>0 && bk>=tot) return 'full'; if(bk>0) return 'partial'; return 'none'; }
 let bookedFulfil='all'; function setBookedFulfil(v){ bookedFulfil=v; render(); }
 function bookedFulfilMatch(b){ return bookedFulfil==='all'||bookedFulfilStatus(b)===bookedFulfil; }
-function bookedBar(){ if(!(isSuper()||isVcm())) return ''; const conf=DB.bookings.filter(b=>b.status==='confirmed'); let full=0,partial=0,none=0,foc=0,paid=0; conf.forEach(b=>{ const st=bookedFulfilStatus(b); if(st==='full') full++; else if(st==='partial') partial++; else none++; foc+=focMarked(b); paid+=paidMarked(b); });
+function bookedBar(){ if(!(isSuper()||isVcm())) return ''; const conf=DB.bookings.filter(b=>b.status==='confirmed'||b.status==='part'); let full=0,partial=0,none=0,foc=0,paid=0; conf.forEach(b=>{ const st=bookedFulfilStatus(b); if(st==='full') full++; else if(st==='partial') partial++; else none++; foc+=focMarked(b); paid+=paidMarked(b); });
   const chip=(k,lbl,col,n)=>`<span onclick="setBookedFulfil('${bookedFulfil===k?'all':k}')" title="Click to filter the list" style="cursor:pointer;display:inline-block;padding:3px 10px;margin:2px 4px 2px 0;border-radius:12px;font-size:.85em;font-weight:600;border:1px solid ${col};background:${bookedFulfil===k?col:'#fff'};color:${bookedFulfil===k?'#fff':col}">${lbl}: ${n}</span>`;
   const tag=(lbl,col,n)=>`<span title="Across all confirmed bookings" style="display:inline-block;padding:3px 10px;margin:2px 4px 2px 0;border-radius:12px;font-size:.85em;font-weight:600;border:1px dashed ${col};background:#fff;color:${col}">${lbl}: ${n}</span>`;
   return `<div style="margin:7px 0 2px">${chip('partial','Partially booked','#c77b17',partial)}${chip('full','Fully booked','#2f7d33',full)}${none?chip('none','No rooms yet','#b23b3b',none):''}${tag('FOC rooms','#2f7d33',foc)}${tag('Paid rooms','#2a6fb0',paid)}</div>`; }
