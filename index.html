@@ -398,7 +398,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b161';
+const APP_BUILD='2026-08-16-b162';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -774,7 +774,7 @@ window.addEventListener('visibilitychange', function(){ if(document.visibilitySt
 /* ---------------- Navigation ---------------- */
 let currentTab='';
 function buildTabs(){
-  const adminTabs=[['dash','📊 Dashboard'],['requests','🆕 Requests'],['booked','✅ Booked'],['receipts','🧾 Receipts'],['seva','💰 To collect'],['collections','💰 Payments'],['braj','🏠 Braj Nidhi'],['report','📥 Report'],['notifs','🔔 Alerts<span id="notifBadge" class="tabbadge"></span>'],['hotels','🏨 Hotels'],['vacancy','🛏️ Vacancy'],['contacts','📇 Devotee Contact']];
+  const adminTabs=[['dash','📊 Dashboard'],['requests','🆕 Requests'],['booked','✅ Booked'],['bookedlist','📋 Booked List'],['receipts','🧾 Receipts'],['seva','💰 To collect'],['collections','💰 Payments'],['braj','🏠 Braj Nidhi'],['report','📥 Report'],['notifs','🔔 Alerts<span id="notifBadge" class="tabbadge"></span>'],['hotels','🏨 Hotels'],['vacancy','🛏️ Vacancy'],['contacts','📇 Devotee Contact']];
   const tabs = USER.role==='admin'
     ? [...adminTabs,['donations','🧾 Donations'],['logins','🔑 Logins'],['exports','📥 Excel'],['settings','⚙️ Settings']]
     : USER.role==='vcm'
@@ -811,6 +811,7 @@ function render(){
     if(currentTab==='dash') b.innerHTML=viewDash();
     if(currentTab==='requests') b.innerHTML=viewRequests();
     if(currentTab==='booked') b.innerHTML=viewBooked();
+    if(currentTab==='bookedlist') b.innerHTML=viewBookedList();
     if(currentTab==='braj') b.innerHTML=viewBraj();
     if(currentTab==='receipts') b.innerHTML=viewReceipts();
     if(currentTab==='collections') b.innerHTML=viewCollections();
@@ -1489,6 +1490,33 @@ function bookedBar(){ if(!(isSuper()||isVcm())) return ''; const conf=DB.booking
   const chip=(k,lbl,col,n)=>`<span onclick="setBookedFulfil('${bookedFulfil===k?'all':k}')" title="Click to filter the list" style="cursor:pointer;display:inline-block;padding:3px 10px;margin:2px 4px 2px 0;border-radius:12px;font-size:.85em;font-weight:600;border:1px solid ${col};background:${bookedFulfil===k?col:'#fff'};color:${bookedFulfil===k?'#fff':col}">${lbl}: ${n}</span>`;
   const tag=(lbl,col,n)=>`<span title="Across all confirmed bookings" style="display:inline-block;padding:3px 10px;margin:2px 4px 2px 0;border-radius:12px;font-size:.85em;font-weight:600;border:1px dashed ${col};background:#fff;color:${col}">${lbl}: ${n}</span>`;
   return `<div style="margin:7px 0 2px">${chip('partial','Partially booked','#c77b17',partial)}${chip('full','Fully booked','#2f7d33',full)}${none?chip('none','No rooms yet','#b23b3b',none):''}${tag('FOC rooms','#2f7d33',foc)}${tag('Paid rooms','#2a6fb0',paid)}</div>`; }
+function viewBookedList(){
+      if(!(isSuper()||isVcm())) return '<div class="card"><p>Not available.</p></div>';
+      var list=DB.bookings.filter(function(b){ return b.status==='confirmed'||b.status==='part'; }).slice();
+      list.sort(function(a,b){ return (a.serial||0)-(b.serial||0); });
+      var rows=list.map(function(b){
+        var tot=reqCellCount(b), bk=bookedCount(b), pend=Math.max(0,tot-bk);
+        var cells=rnCells(b).cells; var bset=bookedSetOf(b);
+        var focB=0,paidB=0; cells.forEach(function(c){ if(bset[c.room+'-'+c.night]){ if(c.foc) focB++; else paidB++; } });
+        var entitled=focBudget(b); var extraFoc=Math.max(0, focB-entitled);
+        var by=b.editedBy||'';
+        var pill=(bk>=tot&&tot>0)?'<span class="pill p-confirmed">full</span>':(bk>0?'<span class="pill p-edited">partial</span>':'<span class="pill p-pending">none</span>');
+        var reqR=Math.max(1,b.roomsRequested||1);
+        return '<tr onclick="go(\'booked\');setTimeout(function(){scrollToReq(\''+b.id+'\')},80)" style="cursor:pointer">'
+          +'<td><b>#'+String(b.serial||0).padStart(3,'0')+'</b></td>'
+          +'<td><b>'+esc(b.head||'—')+'</b><div class="muted">'+esc(devoteeName(b)||'')+'</div></td>'
+          +'<td>'+reqR+' room'+(reqR>1?'s':'')+'<div class="muted">'+tot+' night'+(tot===1?'':'s')+'</div></td>'
+          +'<td><b>'+bk+'</b> booked'+(pend>0?' · <b style="color:#c0392b">'+pend+' pending</b>':'')+'</td>'
+          +'<td><b style="color:#2f7d33">'+focB+'</b> FOC · <b style="color:#c0392b">'+paidB+'</b> paid</td>'
+          +'<td>'+(extraFoc>0?('<b style="color:#c77b17">+'+extraFoc+' extra FOC</b>'+(by?('<div class="muted">by '+esc(by)+'</div>'):'')):'—')+'</td>'
+          +'<td>'+pill+'</td></tr>';
+      }).join('');
+      return '<div class="card"><h2 class="section">📋 Booked List <span class="pill p-confirmed">'+list.length+'</span></h2>'
+        +'<p class="subhead">Every booking with rooms held. Click a row to open its request. FOC = free room-nights (by donation), Paid = chargeable. “Extra FOC” = free nights given beyond the donation entitlement, with who last edited it.</p>'
+        +'<div style="overflow-x:auto"><table><thead><tr><th>#</th><th>Guest / Devotee</th><th>Requested</th><th>Booked</th><th>FOC / Paid (nights)</th><th>Extra FOC</th><th>Status</th></tr></thead><tbody>'
+        +(rows||'<tr><td colspan="7" class="muted">No bookings yet.</td></tr>')
+        +'</tbody></table></div></div>';
+    }
 function viewBooked(){
   const allConf=DB.bookings.filter(b=>b.status==='confirmed'||b.status==='part');
   const shortCount=allConf.filter(b=>roomsShort(b)>0).length;
