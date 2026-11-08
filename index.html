@@ -398,7 +398,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b166';
+const APP_BUILD='2026-08-16-b167';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -1734,7 +1734,7 @@ function roomNightPanel(b){
         return "<div style=\"margin:4px 0\"><span style=\"font-size:.8em;color:#555\">Room "+(Number(ri)+1)+":</span>"+typeSel+chips+dlab+"</div>";
       }).join("");
       var pill = bkN>0 ? (bkN>=total?"<span class=\"pill p-confirmed\">fully confirmed</span>":"<span class=\"pill p-edited\">partly confirmed</span>") : (selN>0?"<span class=\"pill p-waitlist\">saved · pending receipt</span>":"<span class=\"pill p-pending\">nothing selected</span>");
-      var hint=(can&&hasHotel)?("<div style=\"font-size:.72em;color:#999;margin:2px 0 3px\"><b>Key:</b> <span style='padding:1px 5px;border-radius:5px;background:#e8f5e9;border:1px solid #8cc591;color:#2f7d33;font-weight:700'>✓</span> booked FOC (free) · <span style='padding:1px 5px;border-radius:5px;background:#fbe1dd;border:1px solid #e3a9a2;color:#b23b32;font-weight:700'>✓</span> booked Paid · <span style='padding:1px 5px;border-radius:5px;background:#fff6e5;border:1px solid #e6c77a;color:#9a6b00;font-weight:700'>○</span> selected (not booked) · <span style='padding:1px 9px;border-radius:5px;background:#fff;border:1px solid #d9d2c2'> </span> free <br>Tap a night to pick · tap the FOC/Paid badge to switch price</div>"):"";
+      var hint=(can&&hasHotel)?("<div style=\"font-size:.72em;color:#999;margin:2px 0 3px\"><b>Key:</b> <span style='white-space:nowrap;display:inline-block;margin:0 10px 2px 0'><span style='padding:1px 5px;border-radius:5px;background:#e8f5e9;border:1px solid #8cc591;color:#2f7d33;font-weight:700'>✓</span> booked FOC (free)</span><span style='white-space:nowrap;display:inline-block;margin:0 10px 2px 0'><span style='padding:1px 5px;border-radius:5px;background:#fbe1dd;border:1px solid #e3a9a2;color:#b23b32;font-weight:700'>✓</span> booked Paid</span><span style='white-space:nowrap;display:inline-block;margin:0 10px 2px 0'><span style='padding:1px 5px;border-radius:5px;background:#fff6e5;border:1px solid #e6c77a;color:#9a6b00;font-weight:700'>○</span> selected (not booked)</span><span style='white-space:nowrap;display:inline-block;margin:0 10px 2px 0'><span style='padding:1px 8px;border-radius:5px;background:#fff;border:1px solid #d9d2c2'>&nbsp;</span> free</span><br>Tap a night to pick · tap the FOC/Paid badge to switch price</div>"):"";
       var needHotel=(can&&!hasHotel)?"<div style=\"font-size:.74em;color:#b26a00;margin:2px 0\">Pick a hotel above, then set each room’s type & nights</div>":"";
       var rcptNote=(can&&hasHotel&&rcptNeeded&&!rcptOk)?"<div style=\"font-size:.74em;color:#b26a00;background:#fff6e5;border:1px solid #e6c77a;border-radius:6px;padding:4px 7px;margin:3px 0\">⚠ Receipt not verified — select the nights here, then press <b>Confirm</b> once the receipt is verified in the 🧾 Receipts panel to book.</div>":"";
       var bStyle="width:auto;display:inline-block;flex:0 0 auto";
