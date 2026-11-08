@@ -398,7 +398,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b168';
+const APP_BUILD='2026-08-16-b169';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -1464,11 +1464,11 @@ function viewRequests(){
       <td>${dead?'<span class="muted">room released</span>':allocCell(b)}</td>
       <td><div class="row-actions">${dead
         ? `<button class="btn gray sm" onclick="setStatus('${b.id}','pending')">Reopen</button>`
-        : `<button class="btn green sm" onclick="approve('${b.id}')">Confirm</button>
+        : `<button class="btn red sm" onclick="setStatus('${b.id}','rejected')">Reject</button>
            <button class="btn gray sm" onclick="approveLock('${b.id}')">🔒 Lock &amp; Confirm</button>
            ${isSuper()?`<button class="btn gray sm" onclick="approveNoReceipt('${b.id}')" title="Super Admin override">Confirm without receipt</button>`:''}
            <button class="btn gray sm" onclick="setStatus('${b.id}','waitlist')">Waitlist</button>
-           <button class="btn red sm" onclick="setStatus('${b.id}','rejected')">Reject</button>${roomKeyLegend(b)}`}
+           <button class="btn green sm" onclick="approve('${b.id}')">Confirm</button>${roomKeyLegend(b)}`}
       </div></td></tr><tr><td colspan="5" style="padding:0 12px 12px;border-top:none">${commentPanel(b)}</td></tr>`; }).join('');
   return `<div class="card"><h2 class="section">🆕 New Requests <span class="pill p-pending">${activeCount}</span></h2>
     <p class="subhead">Pick hotel → room type → adjust rooms → Confirm. Use <b>🔒 Lock &amp; Confirm</b> to confirm and protect it from auto-reallocation. Cancelled/pulled-back requests show greyed out with their room released.</p>${allocSummaryCard(list)}
@@ -1527,9 +1527,9 @@ function viewBooked(){
       <td>${allocDetailHTML(b)}</td>
       <td>${allocCell(b)}</td>
       <td><div class="row-actions">
-        <button class="btn green sm" onclick="approve('${b.id}')">Save changes</button>
+        <button class="btn gray sm" onclick="setStatus('${b.id}','pending')">Move to pending</button>
         <button class="btn gray sm" onclick="toggleLock('${b.id}')">${b.locked?'🔓 Unlock':'🔒 Lock'}</button>
-        <button class="btn gray sm" onclick="setStatus('${b.id}','pending')">Move to pending</button>${roomKeyLegend(b)}
+        <button class="btn green sm" onclick="approve('${b.id}')">Save changes</button>${roomKeyLegend(b)}
       </div></td></tr><tr><td colspan="5" style="padding:0 12px 12px;border-top:none">${commentPanel(b)}</td></tr>`).join('');
   return `<div class="card"><h2 class="section">✅ Booked <span class="pill p-confirmed">${list.length}</span></h2>
     <p class="subhead">These are confirmed. Edit the allocation and press <b>Save changes</b>. <b>Lock</b> a booking to protect it from automatic reallocation and swaps.</p>
