@@ -398,7 +398,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b169';
+const APP_BUILD='2026-08-16-b170';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -1729,10 +1729,10 @@ function roomKeyLegend(b){var dead=(b.status==='rejected'||b.status==='cancelled
           var pCol=c.foc?'#2f7d33':'#c0392b', pBg=isSel?(c.foc?'#d8efdb':'#f6cfc9'):'#ffffff';
           var confAttr=(can&&hasHotel&&roomTypeOf(b,ri))?("onclick=\"toggleConfCell('"+b.id+"',"+c.room+","+c.night+")\" style=\"cursor:pointer;"):"style=\"";
           var priceAttr=can?("onclick=\"event.stopPropagation();toggleFocCell('"+b.id+"',"+c.room+","+c.night+")\" title=\"switch FOC / Paid\" style=\"cursor:pointer;"):"style=\"";
-          return "<span "+confAttr+"display:inline-flex;align-items:center;gap:5px;padding:2px 6px 2px 9px;margin:2px;border-radius:8px;font-size:.78em;font-weight:700;border:1px solid "+cBd+";background:"+cBg+";color:"+cCol+"\">"+mark+"N"+(c.night+1)+"<span "+priceAttr+"padding:0 6px;border-radius:5px;font-size:.92em;font-weight:700;border:1px solid "+pCol+";background:"+pBg+";color:"+pCol+"\">"+(c.foc?"FOC":"Paid")+"</span></span>";
+          return "<span "+confAttr+"display:inline-flex;align-items:center;gap:3px;padding:2px 5px;margin:0;border-radius:7px;font-size:.72em;font-weight:700;border:1px solid "+cBd+";background:"+cBg+";color:"+cCol+"\">"+mark+"N"+(c.night+1)+"<span "+priceAttr+"padding:0 6px;border-radius:5px;font-size:.92em;font-weight:700;border:1px solid "+pCol+";background:"+pBg+";color:"+pCol+"\">"+(c.foc?"FOC":"Paid")+"</span></span>";
         }).join("");
         var dlab=st?(" <span style=\"display:block;margin-top:2px;font-size:.72em;color:#888\">("+fmtD(st.checkin)+"→"+fmtD(st.checkout)+")</span>"):"";
-        return "<div style=\"margin:4px 0\"><span style=\"font-size:.8em;color:#555\">Room "+(Number(ri)+1)+":</span>"+typeSel+chips+dlab+"</div>";
+        return "<div style=\"margin:4px 0\"><span style=\"font-size:.8em;color:#555\">Room "+(Number(ri)+1)+":</span>"+typeSel+"<div style='display:grid;grid-template-columns:repeat(3,max-content);gap:4px;margin-top:3px'>"+chips+"</div>"+dlab+"</div>";
       }).join("");
       var pill = bkN>0 ? (bkN>=total?"<span class=\"pill p-confirmed\">fully confirmed</span>":"<span class=\"pill p-edited\">partly confirmed</span>") : (selN>0?"<span class=\"pill p-waitlist\">saved · pending receipt</span>":"<span class=\"pill p-pending\">nothing selected</span>");
       var hint=(can&&hasHotel)?("<div style=\"font-size:.72em;color:#999;margin:2px 0 3px\"><b>Key:</b> <span style='white-space:nowrap;display:inline-block;margin:0 10px 2px 0'><span style='padding:1px 5px;border-radius:5px;background:#e8f5e9;border:1px solid #8cc591;color:#2f7d33;font-weight:700'>✓</span> booked FOC (free)</span><span style='white-space:nowrap;display:inline-block;margin:0 10px 2px 0'><span style='padding:1px 5px;border-radius:5px;background:#fbe1dd;border:1px solid #e3a9a2;color:#b23b32;font-weight:700'>✓</span> booked Paid</span><span style='white-space:nowrap;display:inline-block;margin:0 10px 2px 0'><span style='padding:1px 5px;border-radius:5px;background:#fff6e5;border:1px solid #e6c77a;color:#9a6b00;font-weight:700'>○</span> selected (not booked)</span><span style='white-space:nowrap;display:inline-block;margin:0 10px 2px 0'><span style='padding:1px 8px;border-radius:5px;background:#fff;border:1px solid #d9d2c2'>&nbsp;</span> free</span><br>Tap a night to pick · tap the FOC/Paid badge to switch price</div>"):"";
