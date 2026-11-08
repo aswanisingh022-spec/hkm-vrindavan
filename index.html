@@ -398,7 +398,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b164';
+const APP_BUILD='2026-08-16-b165';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -1742,7 +1742,7 @@ function roomNightPanel(b){
       return "<div style=\"margin-top:6px;background:#fff;border:1px solid #e0d6c0;border-radius:8px;padding:8px 10px\">"
         +"<div style=\"font-weight:700;color:#2f7d33\">🏠 Rooms & nights "+pill+"</div>"
         +"<div style=\"margin:2px 0;font-size:.82em;color:#555\">Total <b>"+total+"</b> · <b style=\"color:#2f7d33\">"+foc+"</b> FOC · <b style=\"color:#c0392b\">"+paid+"</b> paid · Selected <b>"+selN+"</b> · Booked <b>"+bkN+"</b>/<b>"+total+"</b></div>"
-        +hint+needHotel+rcptNote+lines+btns+"</div>";
+        +needHotel+rcptNote+lines+btns+hint+"</div>";
     }
 function needsReceiptFor(b){ var gt=(b.guestType||'FR'); var isKindNoReceipt=(b.sevaPlan==='kind' && !b.receipt); return (gt==='FR') && !isKindNoReceipt; }
 function canBookNow(b,skip){ return !needsReceiptFor(b) || !!skip || !!b.donationVerified || !!b.confirmedWithoutReceipt; }
