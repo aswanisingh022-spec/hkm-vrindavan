@@ -398,7 +398,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b170';
+const APP_BUILD='2026-08-16-b171';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -1774,7 +1774,7 @@ function allocSummaryCard(list){
       return '<details style="margin:0 0 12px;background:#fffdf8;border:1px solid #e9e1cf;border-radius:10px;padding:8px 12px"'+((shortN>0)?' open':'')+'><summary style="cursor:pointer;font-weight:700;color:'+hdrCol+'">'+summaryTxt+'</summary><div style="margin-top:6px">'+items+'</div></details>';
     }
 function selectAllCells(id){ var b=DB.bookings.find(function(x){return x.id===id;}); if(!b||!(isSuper()||isVcm())) return; var h=DB.hotels.find(function(x){return x.id===b.hotel;}); if(!h){ if(typeof toast==='function') toast('Pick a hotel first'); return; } if(!b.confCells||typeof b.confCells!=='object') b.confCells=Object.assign({},selSetOf(b)); var cells=rnCells(b).cells; var blocked=0, notype=0; cells.forEach(function(c){ var key=c.room+'-'+c.night; if(b.confCells[key]) return; if(!c.type){ notype++; return; } var st=roomStayOf(b,c.room); var d=cellDate(st,c.night); var free=roomCapOnNight(h,c.type,d)-roomsUsedOnNight(h.id,c.type,d,b.id)-sameBkUsedOnNight(b,c.type,d,c.room); if(free>0){ b.confCells[key]=true; } else blocked++; }); syncConfStatus(b); save(); render(); if(typeof toast==='function') toast('Selected free nights'+(blocked?' · '+blocked+' full':'')+(notype?' · '+notype+' need a room type':'')); }
-function allocRoomCount(b){ var n=Math.max(0,Number(b.rooms)||0); if(n>0) return n; if(b.stays&&b.stays.length) return b.stays.length; return b.checkin?1:0; }
+function allocRoomCount(b){ if(b.rooms!=null && b.rooms!==''){ return Math.max(0,Number(b.rooms)||0); } if(b.stays&&b.stays.length) return b.stays.length; return b.checkin?1:0; }
 function roomStayOf(b,ri){ var l=(b.stays&&b.stays.length)?b.stays:[]; if(ri<l.length) return l[ri]; return {checkin:(b.checkin||DB.rules.eventStart), checkout:(b.checkout||DB.rules.eventEnd)}; }
 function roomTypeOf(b,ri){ if(b.roomTypes && b.roomTypes[ri]) return b.roomTypes[ri]; if(b.roomType) return b.roomType; var h=DB.hotels.find(function(x){return x.id===b.hotel;}); return (h&&h.rooms&&h.rooms[0])?h.rooms[0].type:''; }
 function setRoomType(id,ri,type){ var b=DB.bookings.find(function(x){return x.id===id;}); if(!b||!(isSuper()||isVcm())) return; b.roomTypes=b.roomTypes||{}; b.roomTypes[ri]=type; save(); render(); }
