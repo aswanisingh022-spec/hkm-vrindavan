@@ -398,7 +398,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b173';
+const APP_BUILD='2026-08-16-b174';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -1457,7 +1457,7 @@ function viewRequests(){
   const activeCount=list.filter(b=>b.status==='pending'||b.status==='waitlist').length;
   const rows=list.map(b=>{
     const dead=b.status==='cancelled'||b.status==='withdrawn'||b.status==='rejected';
-    return `<tr id="row-${b.id}" data-search="${esc(((b.head||'')+' '+(b.phone||'')+' '+(b.brahmachari||'')+' '+devoteeName(b)+' '+(b.devId||'')).toLowerCase())}"${dead?' style="opacity:.6"':''}>
+    return `<tr id="row-${b.id}" data-search="${esc(((b.head||'')+' '+(b.phone||'')+' '+(b.brahmachari||'')+' '+devoteeName(b)+' '+(b.devId||'')+' #'+(b.serial||'')+' '+(b.serial||'')).toLowerCase())}"${dead?' style="opacity:.6"':''}>
       <td>${guestCell(b,!dead)}</td>
       <td>${donDisplay(b)}<div class="muted">${donSub(b)}</div></td>
       <td>${statusPill(b.status)}</td>
@@ -1502,7 +1502,7 @@ function viewBookedList(){
         var by=b.editedBy||'';
         var pill=(bk>=tot&&tot>0)?'<span class="pill p-confirmed">full</span>':(bk>0?'<span class="pill p-edited">partial</span>':'<span class="pill p-pending">none</span>');
         var reqR=Math.max(1,b.roomsRequested||1);
-        return '<tr onclick="go(\'booked\');setTimeout(function(){scrollToReq(\''+b.id+'\')},80)" style="cursor:pointer">'
+        return '<tr onclick="go(\'booked\');setTimeout(function(){scrollToReq(\''+b.id+'\')},80)" style="cursor:pointer" data-search="'+esc(((b.serial||'')+' #'+String(b.serial||0).padStart(3,'0')+' '+(b.head||'')+' '+(devoteeName(b)||'')).toLowerCase())+'">'
           +'<td><b>#'+String(b.serial||0).padStart(3,'0')+'</b></td>'
           +'<td><b>'+esc(b.head||'—')+'</b><div class="muted">'+esc(devoteeName(b)||'')+'</div></td>'
           +'<td>'+reqR+' room'+(reqR>1?'s':'')+'<div class="muted">'+tot+' night'+(tot===1?'':'s')+'</div></td>'
@@ -1512,8 +1512,8 @@ function viewBookedList(){
           +'<td>'+pill+'</td></tr>';
       }).join('');
       return '<div class="card"><h2 class="section">📋 Booked List <span class="pill p-confirmed">'+list.length+'</span></h2>'
-        +'<p class="subhead">Every booking with rooms held. Click a row to open its request. FOC = free room-nights (by donation), Paid = chargeable. “Extra FOC” = free nights given beyond the donation entitlement, with who last edited it.</p>'
-        +'<div style="overflow-x:auto"><table><thead><tr><th>#</th><th>Guest / Devotee</th><th>Requested</th><th>Booked</th><th>FOC / Paid (nights)</th><th>Extra FOC</th><th>Status</th></tr></thead><tbody>'
+        +'<p class="subhead">Every booking with rooms held. Click a row to open its request. FOC = free room-nights (by donation), Paid = chargeable. “Extra FOC” = free nights given beyond the donation entitlement, with who last edited it.</p>' +'<div style="margin-bottom:10px"><input placeholder="🔍 Search by serial #, guest or devotee" value="'+esc(searchQ['blBody']||'')+'" oninput="setSearch(\'blBody\',this.value)" style="width:100%;padding:6px 8px;border:1px solid #e0d6c0;border-radius:6px"></div>'
+        +'<div style="overflow-x:auto"><table><thead><tr><th>#</th><th>Guest / Devotee</th><th>Requested</th><th>Booked</th><th>FOC / Paid (nights)</th><th>Extra FOC</th><th>Status</th></tr></thead><tbody id="blBody">'
         +(rows||'<tr><td colspan="7" class="muted">No bookings yet.</td></tr>')
         +'</tbody></table></div></div>';
     }
@@ -1521,7 +1521,7 @@ function viewBooked(){
   const allConf=DB.bookings.filter(b=>b.status==='confirmed'||b.status==='part');
   const shortCount=allConf.filter(b=>roomsShort(b)>0).length;
   const list=sortBookings((bookedShortOnly?allConf.filter(b=>roomsShort(b)>0):allConf).filter(bookedFulfilMatch), bookedSort);
-  const rows=list.map(b=>`<tr id="row-${b.id}" data-search="${esc(((b.head||'')+' '+(b.phone||'')+' '+(b.brahmachari||'')+' '+devoteeName(b)+' '+(b.devId||'')+' '+hotelName(b.hotel)).toLowerCase())}">
+  const rows=list.map(b=>`<tr id="row-${b.id}" data-search="${esc(((b.head||'')+' '+(b.phone||'')+' '+(b.brahmachari||'')+' '+devoteeName(b)+' '+(b.devId||'')+' '+hotelName(b.hotel)+' #'+(b.serial||'')+' '+(b.serial||'')).toLowerCase())}">
       <td>${guestCell(b,false)}${b.status==='part'?' <span class=\"pill p-edited\">partially booked</span>':''}${roomsShortBadge(b)}${b.locked?' <span class="pill p-waitlist">🔒 locked</span>':''}${b.confirmedWithoutReceipt?' <span class="pill p-rejected">⚠ no verified receipt</span>':''}</td>
       <td>${donDisplay(b)}</td>
       <td>${allocDetailHTML(b)}</td>
