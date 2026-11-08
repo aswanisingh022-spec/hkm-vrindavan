@@ -398,7 +398,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b171';
+const APP_BUILD='2026-08-16-b172';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -1353,7 +1353,7 @@ function allocCell(b){
       <div class="a-row"><span class="a-lbl">Rooms</span>
         <div class="stepper"><button onclick="stepRooms('${b.id}',-1)">−</button><input type="number" min="0" value="${b.rooms||0}" onchange="setField('${b.id}','rooms',this.value)"><button onclick="stepRooms('${b.id}',1)">+</button></div>
         ${extraCtl}</div>
-      ${metaLine}${transferCtl}${seva}${roomNightPanel(b)}</div>`;
+      ${metaLine}${transferCtl}${seva}</div>`;
 }
 /* Dates cell: Super Admin / VCM get editable check-in & check-out per stay (to shorten/adjust before confirming); others see read-only text. */
 function dateEditHTML(b){
@@ -1398,7 +1398,7 @@ function guestCell(b,withSug){
   return `<b>${headLabel(b)}</b>${catTag}${fullTag} ${donFestBadge(b)}${raTierTag(b)}${editedTag(b)}${b.receiptWrong?' <span class="pill p-rejected">✗ receipt wrong</span>':''}<div class="muted">requested by ${esc(devoteeName(b))}${istMeta(b)}${b.phone?` · 📱 ${esc(b.phone)}`:''}</div>
       <div class="muted">${peopleLabel(b)}${b.family?' · 👪 family':''}${b.extraRequested>0?` · 🛏️ ${b.extraRequested} extra bed requested`:''}${reqRoomsTxt}${extraRoomTxt}</div>${raTierNote(b)}
       ${dateEditHTML(b)}
-      ${b.note?`<div class="muted" style="background:#fff4e4;border-radius:6px;padding:4px 8px;margin-top:4px">📝 ${esc(b.note)}</div>`:''}${sugHTML}`;
+      ${b.note?`<div class="muted" style="background:#fff4e4;border-radius:6px;padding:4px 8px;margin-top:4px">📝 ${esc(b.note)}</div>`:''}${sugHTML}${roomNightPanel(b)}`;
 }
 
 /* ---------------- Admin: New Requests (not yet confirmed) ---------------- */
@@ -1732,7 +1732,7 @@ function roomKeyLegend(b){var dead=(b.status==='rejected'||b.status==='cancelled
           return "<span "+confAttr+"display:inline-flex;align-items:center;gap:3px;padding:2px 5px;margin:0;border-radius:7px;font-size:.72em;font-weight:700;border:1px solid "+cBd+";background:"+cBg+";color:"+cCol+"\">"+mark+"N"+(c.night+1)+"<span "+priceAttr+"padding:0 6px;border-radius:5px;font-size:.92em;font-weight:700;border:1px solid "+pCol+";background:"+pBg+";color:"+pCol+"\">"+(c.foc?"FOC":"Paid")+"</span></span>";
         }).join("");
         var dlab=st?(" <span style=\"display:block;margin-top:2px;font-size:.72em;color:#888\">("+fmtD(st.checkin)+"→"+fmtD(st.checkout)+")</span>"):"";
-        return "<div style=\"margin:4px 0\"><span style=\"font-size:.8em;color:#555\">Room "+(Number(ri)+1)+":</span>"+typeSel+"<div style='display:grid;grid-template-columns:repeat(3,max-content);gap:4px;margin-top:3px'>"+chips+"</div>"+dlab+"</div>";
+        return "<div style=\"margin:0;border-left:2px solid #ece4d0;padding:2px 10px;min-width:150px;max-width:200px\"><span style=\"font-size:.8em;color:#555\">Room "+(Number(ri)+1)+":</span>"+typeSel+"<div style='display:grid;grid-template-columns:repeat(1,minmax(0,1fr));gap:4px;margin-top:3px'>"+chips+"</div>"+dlab+"</div>";
       }).join("");
       var pill = bkN>0 ? (bkN>=total?"<span class=\"pill p-confirmed\">fully confirmed</span>":"<span class=\"pill p-edited\">partly confirmed</span>") : (selN>0?"<span class=\"pill p-waitlist\">saved · pending receipt</span>":"<span class=\"pill p-pending\">nothing selected</span>");
       var hint=(can&&hasHotel)?("<div style=\"font-size:.72em;color:#999;margin:2px 0 3px\"><b>Key:</b> <span style='white-space:nowrap;display:inline-block;margin:0 10px 2px 0'><span style='padding:1px 5px;border-radius:5px;background:#e8f5e9;border:1px solid #8cc591;color:#2f7d33;font-weight:700'>✓</span> booked FOC (free)</span><span style='white-space:nowrap;display:inline-block;margin:0 10px 2px 0'><span style='padding:1px 5px;border-radius:5px;background:#fbe1dd;border:1px solid #e3a9a2;color:#b23b32;font-weight:700'>✓</span> booked Paid</span><span style='white-space:nowrap;display:inline-block;margin:0 10px 2px 0'><span style='padding:1px 5px;border-radius:5px;background:#fff6e5;border:1px solid #e6c77a;color:#9a6b00;font-weight:700'>○</span> selected (not booked)</span><span style='white-space:nowrap;display:inline-block;margin:0 10px 2px 0'><span style='padding:1px 8px;border-radius:5px;background:#fff;border:1px solid #d9d2c2'>&nbsp;</span> free</span><br>Tap a night to pick · tap the FOC/Paid badge to switch price</div>"):"";
@@ -1743,7 +1743,7 @@ function roomKeyLegend(b){var dead=(b.status==='rejected'||b.status==='cancelled
       return "<div style=\"margin-top:6px;background:#fff;border:1px solid #e0d6c0;border-radius:8px;padding:8px 10px\">"
         +"<div style=\"font-weight:700;color:#2f7d33\">🏠 Rooms & nights "+pill+"</div>"
         +"<div style=\"margin:2px 0;font-size:.82em;color:#555\">Total <b>"+total+"</b> · <b style=\"color:#2f7d33\">"+foc+"</b> FOC · <b style=\"color:#c0392b\">"+paid+"</b> paid · Selected <b>"+selN+"</b> · Booked <b>"+bkN+"</b>/<b>"+total+"</b></div>"
-        +needHotel+rcptNote+lines+btns+"</div>";
+        +needHotel+rcptNote+"<div style='display:flex;flex-wrap:wrap;align-items:flex-start;gap:0'>"+lines+"</div>"+btns+"</div>";
     }
 function needsReceiptFor(b){ var gt=(b.guestType||'FR'); var isKindNoReceipt=(b.sevaPlan==='kind' && !b.receipt); return (gt==='FR') && !isKindNoReceipt; }
 function canBookNow(b,skip){ return !needsReceiptFor(b) || !!skip || !!b.donationVerified || !!b.confirmedWithoutReceipt; }
