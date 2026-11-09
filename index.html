@@ -398,7 +398,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b178';
+const APP_BUILD='2026-08-16-b179';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -1419,9 +1419,9 @@ function setReqSort(v){ reqSort=v; render(); }
 let reqFilter='all';
 function setReqFilter(v){ reqFilter=v; render(); }
 function fulfilStatus(b){ if(b.status==='cancelled'||b.status==='withdrawn'||b.status==='rejected') return 'closed';
-  const req=Math.max(1,b.roomsRequested||1), approved=allocApproved(b), decided=(b.focApproved!=null)||(b.paidApproved!=null)||b.status==='confirmed';
-  if(approved>=req) return 'full'; if(approved>0) return 'partial'; return decided?'none':'pending'; }
-function fulfilCounts(){ const c={full:0,partial:0,none:0,pending:0}; DB.bookings.forEach(b=>{ if(b.status==='confirmed') return; const f=fulfilStatus(b); if(c[f]!=null) c[f]++; }); return c; }
+  var tot=(typeof reqCellCount==='function')?reqCellCount(b):0, done=(typeof selCount==='function')?selCount(b):0, decided=(b.focApproved!=null)||(b.paidApproved!=null)||b.status==='confirmed'||b.status==='part';
+  if(tot>0 && done>=tot) return 'full'; if(done>0) return 'partial'; return decided?'none':'pending'; }
+function fulfilCounts(){ const c={full:0,partial:0,none:0,pending:0}; DB.bookings.forEach(b=>{ if(b.status==='confirmed'||b.status==='part') return; const f=fulfilStatus(b); if(c[f]!=null) c[f]++; }); return c; }
 function fulfilBar(){ if(!(isSuper()||isVcm())) return ''; const c=fulfilCounts(); const chip=(k,lbl,col)=>`<span onclick="setReqFilter('${reqFilter===k?'all':k}')" title="Click to filter the list" style="cursor:pointer;display:inline-block;padding:3px 10px;margin:2px 4px 2px 0;border-radius:12px;font-size:.85em;font-weight:600;border:1px solid ${col};background:${reqFilter===k?col:'#fff'};color:${reqFilter===k?'#fff':col}">${lbl}: ${c[k]}</span>`;
   return `<div style="margin:7px 0 2px">${chip('partial','Partially fulfilled','#c77b17')}${chip('none','Not fulfilled','#b23b3b')}${chip('pending','Pending decision','#7a6a2f')}${chip('full','Fully fulfilled','#2f7d33')}</div>`; }
 function reqFilterMatch(b){ const d=Number(b.donation)||0;
