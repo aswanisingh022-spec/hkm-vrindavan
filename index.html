@@ -379,7 +379,7 @@ async function syncToCloud(){
   const allBk = (role==='admin'||role==='vcm'||role==='accounts');
   const mine=DB.bookings.filter(b=> allBk ? true : b.devId===mylogin);
   if(mine.length){
-    const up=await sb.from('bookings').upsert(mine.map(b=>({id:b.id,dev_id:b.devId||null,data:bookingData(b)})));
+    const up=await sb.from('bookings').upsert(mine.map(b=>({id:b.id,dev_id:b.devId||null,serial:(b.serial!=null?b.serial:undefined),data:bookingData(b)})));
     if(up.error){ console.warn('booking save failed', up.error); toast('⚠ Could not save to server — please check your connection and try again'); return; }
     await sb.from('donations').upsert(mine.map(b=>({booking_id:b.id,receipt:b.receipt||'',donation_verified:!!b.donationVerified,receipt_wrong:!!b.receiptWrong})));
     if(role!=='vcm' && role!=='accounts'){ await sb.from('amounts').upsert(mine.map(b=>({booking_id:b.id,amount:Number(b.donation)||0}))); }
@@ -398,7 +398,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b186';
+const APP_BUILD='2026-08-16-b187';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -1071,7 +1071,9 @@ function toggleSame(i){
   if(chk.checked){ ci.value=ci0; co.value=co0; ci.disabled=true; co.disabled=true; }
   else { ci.disabled=false; co.disabled=false; }
 }
-function submitReq(){
+function nextSerial(){ var mx=0; DB.bookings.forEach(function(x){ var s=Number(x.serial)||0; if(s>mx) mx=s; }); return mx+1; }
+    function renumberSerials(){ if(!isSuper()){ if(typeof toast==='function') toast('Super Admin only'); return; } var list=DB.bookings.slice().sort(function(a,b){ return (a.created||0)-(b.created||0); }); list.forEach(function(b,i){ b.serial=i+1; }); if(typeof save==='function') save(); render(); if(typeof toast==='function') toast('Renumbered '+list.length+' requests in order (1 to '+list.length+')'); }
+    function submitReq(){
   const head=$('#reqHead').value.trim();
   if(!head){ toast('Enter the head of family name'); return; }
   const total=Math.max(1,parseInt($('#reqTotal').value)||1);
@@ -1120,7 +1122,7 @@ function submitReq(){
     editingId=null; save(); toast('Request updated ✓ — admin notified'); go('myreq'); return; }
   const full = totalFreeRooms()<=0;
   const b=Object.assign({id:uid('b'),brahmachari:USER.name,devId:USER.id,extraBeds:0,
-    status:'pending',hotel:'',roomType:'',rooms:0,created:Date.now(),bookedWhenFull:full},data);
+    status:'pending',hotel:'',roomType:'',rooms:0,created:Date.now(),bookedWhenFull:full},data); b.serial=nextSerial();
   DB.bookings.unshift(b);
   notify('new',`New request: ${b.head} (${b.count} ${b.count===1?'person':'people'}) — ${b.roomsRequested} room(s)${b.extraRequested?`, ${b.extraRequested} extra bed`:''}${full?' — ⚠ received while fully booked (waitlist)':''}`,USER.name,b.id);
   save(); go('myreq');
@@ -2472,7 +2474,7 @@ function viewSettings(){
       <div class="card"><h2 class="section" style="margin:0 0 6px">Media guests</h2>${typeCheck('Media')}</div>
       <div class="card"><h2 class="section" style="margin:0 0 6px">Volunteer guests</h2>${typeCheck('Volunteer')}</div>
     </div></div>
-    <div class="card" style="border:2px solid var(--red)">
+    <div class="card"><h2 class="section">🔢 Request serial numbers</h2><p class="subhead">Give every request a clean sequential number (1, 2, 3…) in first-come order. New requests continue the sequence automatically.</p><button class="btn" onclick="renumberSerials()">↻ Renumber all serials (1, 2, 3…)</button></div><div class="card" style="border:2px solid var(--red)">
     <h2 class="section" style="color:var(--red)">🗑️ Danger zone — Hard delete all data</h2>
     <p class="subhead">Permanently deletes <b>all</b> bookings, receipts, donation amounts and alerts. This cannot be undone. Enter the security PIN to enable the delete button.</p>
     <div class="flex" style="align-items:center;gap:10px;flex-wrap:wrap">
