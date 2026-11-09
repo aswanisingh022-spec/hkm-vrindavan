@@ -398,7 +398,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b188';
+const APP_BUILD='2026-08-16-b189';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -774,7 +774,7 @@ window.addEventListener('visibilitychange', function(){ if(document.visibilitySt
 /* ---------------- Navigation ---------------- */
 let currentTab='';
 function buildTabs(){
-  const adminTabs=[['dash','📊 Dashboard'],['requests','🆕 Requests'],['booked','✅ Booked'],['bookedlist','📋 Booked List'],['receipts','🧾 Receipts'],['seva','💰 To collect'],['collections','💰 Payments'],['braj','🏠 Braj Nidhi'],['report','📥 Report'],['notifs','🔔 Alerts<span id="notifBadge" class="tabbadge"></span>'],['hotels','🏨 Hotels'],['vacancy','🛏️ Vacancy'],['contacts','📇 Devotee Contact']];
+  const adminTabs=[['dash','📊 Dashboard'],['requests','🆕 Requests'],['booked','✅ Booked'],['bookedlist','📋 Booked List'],['vacancy','🛏️ Vacancy'],['receipts','🧾 Receipts'],['seva','💰 To collect'],['collections','💰 Payments'],['braj','🏠 Braj Nidhi'],['report','📥 Report'],['notifs','🔔 Alerts<span id="notifBadge" class="tabbadge"></span>'],['hotels','🏨 Hotels'],['contacts','📇 Devotee Contact']];
   const tabs = USER.role==='admin'
     ? [...adminTabs,['donations','🧾 Donations'],['logins','🔑 Logins'],['exports','📥 Excel'],['settings','⚙️ Settings']]
     : USER.role==='vcm'
