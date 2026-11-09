@@ -398,7 +398,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b183';
+const APP_BUILD='2026-08-16-b184';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -2124,7 +2124,8 @@ function viewVacancy(){
     }
 
 /* ---------------- Admin: Excel Export ---------------- */
-function bookingRow(b){ const t=raTier(b); const loc=b.hotel?hotelsTextForBooking(b):'Not allocated'; return {
+function commentsText(b){ return (Array.isArray(b.comments)?b.comments.map(function(c){ var d=c.ts?(' ['+new Date(c.ts).toLocaleDateString()+']'):''; return (c.author||'')+d+': '+(c.text||''); }).join(' | '):''); }
+    function bookingRow(b){ const t=raTier(b); const loc=b.hotel?hotelsTextForBooking(b):'Not allocated'; return {
   'Head of Family':b.head||'', 'Guest Mobile':b.phone||'', 'Accompanying':b.accompanying!==undefined?b.accompanying:'',
   'Total People':b.count, 'Devotee':devoteeName(b), 'Donation (₹)':b.donation||0,
   'Category':computeCat(b.donation), 'Occasion':donFestLabel(b), 'Priority (RA policy)':t?('P'+t.n+' · '+t.cat):'',
@@ -2135,7 +2136,7 @@ function bookingRow(b){ const t=raTier(b); const loc=b.hotel?hotelsTextForBookin
   'Check-in':b.checkin||'', 'Check-out':b.checkout||'',
   'Room Dates':(b.stays&&b.stays.length>1)?b.stays.map((s,i)=>`R${i+1} ${s.checkin}→${s.checkout}`).join(' ; '):'',
   'Hotel Contact':b.hotel?hotelSendContacts(b.hotel).map(c=>c.name+' '+c.phone).join(' ; '):'',
-  'Preferred':(b.preferred||[]).map(hotelName).join(', '), 'Note':b.note||'' }; }
+  'Preferred':(b.preferred||[]).map(hotelName).join(', '), 'Note':b.note||'', 'Internal Notes':commentsText(b) }; }
 function dl(wb,name){ XLSX.writeFile(wb,name); toast('Downloaded '+name); }
 function exportFull(){ const wb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(DB.bookings.map(bookingRow)),'All Bookings');
@@ -2299,7 +2300,7 @@ function accommodationRow(b){ return {
   'Guest House(s)':hotelsTextForBooking(b), 'Rooms':allocSummary(b),
   'Check-in':b.checkin||'', 'Check-out':b.checkout||'', 'Nights':nights(b),
   'Seva':(b.guestType&&b.guestType!=='FR')?'—':(b.donation>=DB.rules.freeMin?'Free stay':(b.sevaCollected?('Received by '+sevaChannelLabel(b).replace(/<[^>]+>/g,'')):'Pending')),
-  'Note':b.note||'' }; }
+  'Note':b.note||'', 'Internal Notes':commentsText(b) }; }
 function exportAccommodation(){ if(typeof XLSX==='undefined'){ toast('Report library still loading — try again'); return; }
   const wb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(reportBookings().map(accommodationRow)), 'Accommodation');
