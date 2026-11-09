@@ -398,7 +398,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b185';
+const APP_BUILD='2026-08-16-b186';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -1489,7 +1489,7 @@ function viewBookedList(){
       var list=DB.bookings.filter(function(b){ return b.status==='confirmed'||b.status==='part'; }).slice();
       list.sort(function(a,b){ return (a.serial||0)-(b.serial||0); });
       var rows=list.map(function(b){
-        var tot=reqCellCount(b), bk=bookedCount(b), pend=Math.max(0,tot-bk);
+        var tot=reqSizeCells(b), bk=bookedCount(b), pend=Math.max(0,tot-bk);
         var cells=rnCells(b).cells; var bset=bookedSetOf(b);
         var focB=0,paidB=0; cells.forEach(function(c){ if(bset[c.room+'-'+c.night]){ if(c.foc) focB++; else paidB++; } });
         var entitled=focBudget(b); var extraFoc=Math.max(0, focB-entitled);
