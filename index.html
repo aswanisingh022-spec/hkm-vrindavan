@@ -398,7 +398,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b190';
+const APP_BUILD='2026-08-16-b191';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -1069,7 +1069,7 @@ function toggleSame(i){
   const ci=document.querySelector('.ci[data-i="'+i+'"]'), co=document.querySelector('.co[data-i="'+i+'"]');
   const chk=document.querySelector('.sameAbove[data-i="'+i+'"]');
   if(chk.checked){ ci.value=ci0; co.value=co0; ci.disabled=true; co.disabled=true; }
-  else { ci.disabled=false; co.disabled=false; }
+  else { ci.disabled=false; co.disabled=false; } if(typeof updateRnBreak==='function') updateRnBreak();
 }
 function nextSerial(){ var mx=0; DB.bookings.forEach(function(x){ var s=Number(x.serial)||0; if(s>mx) mx=s; }); return mx+1; }
     function renumberSerials(){ if(!isSuper()){ if(typeof toast==='function') toast('Super Admin only'); return; } var list=DB.bookings.slice().sort(function(a,b){ return (a.created||0)-(b.created||0); }); list.forEach(function(b,i){ b.serial=i+1; }); if(typeof save==='function') save(); render(); if(typeof toast==='function') toast('Renumbered '+list.length+' requests in order (1 to '+list.length+')'); }
