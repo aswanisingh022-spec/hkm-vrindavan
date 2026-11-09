@@ -398,7 +398,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b187';
+const APP_BUILD='2026-08-16-b188';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -1496,13 +1496,13 @@ function viewBookedList(){
         var focB=0,paidB=0; cells.forEach(function(c){ if(bset[c.room+'-'+c.night]){ if(c.foc) focB++; else paidB++; } });
         var entitled=focBudget(b); var extraFoc=Math.max(0, focB-entitled);
         var by=b.editedBy||'';
-        var pill=(bk>=tot&&tot>0)?'<span class="pill p-confirmed">full</span>':(bk>0?'<span class="pill p-edited">partial</span>':'<span class="pill p-pending">none</span>');
+        var _br=distinctBookedRooms(b), _rr=Math.max(1,b.roomsRequested||1); var pill=(_br>=_rr)?'<span class="pill p-confirmed">full</span>':(_br>0?'<span class="pill p-edited">partial</span>':'<span class="pill p-pending">none</span>');
         var reqR=Math.max(1,b.roomsRequested||1);
         return '<tr onclick="go(\'booked\');setTimeout(function(){scrollToReq(\''+b.id+'\')},80)" style="cursor:pointer" data-search="'+esc(((b.serial||'')+' #'+String(b.serial||0).padStart(3,'0')+' '+(b.head||'')+' '+(devoteeName(b)||'')).toLowerCase())+'">'
           +'<td><b>#'+String(b.serial||0).padStart(3,'0')+'</b></td>'
           +'<td><b>'+esc(b.head||'—')+'</b><div class="muted">'+esc(devoteeName(b)||'')+'</div></td>'
           +'<td>'+reqR+' room'+(reqR>1?'s':'')+'<div class="muted">'+tot+' night'+(tot===1?'':'s')+'</div></td>'
-          +'<td><b>'+bk+'</b> booked'+(pend>0?' · <b style="color:#c0392b">'+pend+' pending</b>':'')+'</td>'
+          +'<td><b>'+distinctBookedRooms(b)+'</b> of '+reqR+' room'+(reqR>1?'s':'')+((reqR-distinctBookedRooms(b))>0?' · <b style="color:#c0392b">'+(reqR-distinctBookedRooms(b))+' pending</b>':'')+'<div class="muted">'+bk+' of '+tot+' nights</div></td>'
           +'<td><b style="color:#2f7d33">'+focB+'</b> FOC · <b style="color:#c0392b">'+paidB+'</b> paid</td>'
           +'<td>'+(extraFoc>0?('<b style="color:#c77b17">+'+extraFoc+' extra FOC</b>'+(by?('<div class="muted">by '+esc(by)+'</div>'):'')):'—')+'</td>'
           +'<td>'+pill+'</td></tr>';
