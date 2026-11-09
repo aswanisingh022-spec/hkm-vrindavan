@@ -398,7 +398,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b184';
+const APP_BUILD='2026-08-16-b185';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -1685,7 +1685,8 @@ function rnSplit(b){ const rc=rnCells(b); const rooms=[]; rc.cells.forEach(c=>{ 
 function cellDate(st,ni){ let d=(st&&st.checkin)||DB.rules.eventStart; for(let k=0;k<ni;k++) d=nextDay(d); return d; }
 function confSetOf(b){ if(b.confCells&&typeof b.confCells==='object'&&Object.keys(b.confCells).length) return b.confCells; if(b.status==='confirmed'){ var o={}; rnCells(b).cells.forEach(function(c){o[c.room+'-'+c.night]=true;}); return o; } return {}; }
 function allocCellsMap(b){ var o={}; var nr=Math.max(0,Number(b.rooms)||0); rnCells(b).cells.forEach(function(c){ if(c.room<nr) o[c.room+'-'+c.night]=true; }); return o; }
-function reqSizeCells(b){ var nR=Math.max(1,Number(b.roomsRequested)||1); var total=0; for(var i=0;i<nR;i++){ var st=roomStayOf(b,i); total+=stayNightsEx(st); } return total; }
+function entitleSplit(b){ var tot=(typeof reqSizeCells==='function')?reqSizeCells(b):0; var foc=Math.min(focBudget(b),tot); return {foc:foc, paid:Math.max(0,tot-foc), tot:tot}; }
+    function reqSizeCells(b){ var nR=Math.max(1,Number(b.roomsRequested)||1); var total=0; for(var i=0;i<nR;i++){ var st=roomStayOf(b,i); total+=stayNightsEx(st); } return total; }
     function reqCellCount(b){ return rnCells(b).cells.length; }
 function confCount(b){ var cs=confSetOf(b); return Object.keys(cs).filter(function(k){return cs[k];}).length; }
 function distinctConfRooms(b){ var cs=confSetOf(b); var rr={}; Object.keys(cs).forEach(function(k){ if(cs[k]) rr[k.split('-')[0]]=1; }); return Object.keys(rr).length; }
@@ -1826,7 +1827,7 @@ function setDonFest(id,val){ if(!(isSuper()||isAccounts())) return; const b=DB.b
 /* accommodation payment status shown to the devotee */
 function sevaLabel(b){
   if((b.guestType||'FR')!=='FR') return `<span class="pill p-confirmed">🎫 ${esc(b.guestType)}</span>`;   // PR / Media / Volunteer: no seva prompt
-  { const r=rnSplit(b); if(r.total){ if(r.paid===0) return '<span class="pill p-confirmed">🙏 Free stay</span>'; if(r.foc>0) return '<span class="pill p-edited">🙏 '+r.foc+' free · '+r.paid+' paid</span>'; } }
+  { var e=entitleSplit(b); if(e.tot>0){ if(e.paid===0) return '<span class="pill p-confirmed" title="'+e.foc+' free room-nights (FOC) per donation">🙏 '+e.foc+' FOC · 0 paid</span>'; if(e.foc>0) return '<span class="pill p-edited" title="FOC room-nights confirmed free; paid subject to availability">🙏 '+e.foc+' FOC · '+e.paid+' paid</span>'; return '<span class="pill p-pending" title="Paid, subject to availability">'+e.paid+' paid</span>'; } }
   return b.sevaCollected ? '<span class="pill p-confirmed">✅ Seva received</span>' : '<span class="pill p-pending">💰 Seva to be paid</span>'; }
 /* Record that a booking was edited: who (login id) + when + WHAT changed. Notifies admin/VCM; devotee sees it on My Requests. */
 function markEdited(b, note){ b.edited=true; b.editedAt=Date.now(); b.editedBy=USER.id; b.lastEditNote=note||'';
@@ -2129,7 +2130,7 @@ function commentsText(b){ return (Array.isArray(b.comments)?b.comments.map(funct
   'Head of Family':b.head||'', 'Guest Mobile':b.phone||'', 'Accompanying':b.accompanying!==undefined?b.accompanying:'',
   'Total People':b.count, 'Devotee':devoteeName(b), 'Donation (₹)':b.donation||0,
   'Category':computeCat(b.donation), 'Occasion':donFestLabel(b), 'Priority (RA policy)':t?('P'+t.n+' · '+t.cat):'',
-  'Guest Type':b.guestType||'FR', 'Receipt No':b.receipt||'', 'Receipt Verified':b.receiptWrong?'Wrong':(b.donationVerified?'Yes':'No'), 'Seva Received By':b.sevaChannel?sevaChannelLabel(b).replace(/<[^>]+>/g,''):'', 'Seva Date':b.sevaDate||'', 'Accommodation':b.donation>=DB.rules.freeMin?'Free':(b.sevaCollected?'Seva collected':'Seva pending'), 'Status':b.status, 'Hotel':b.hotel?hotelName(b.hotel):'', 'Location (allocated)':loc,
+  'Guest Type':b.guestType||'FR', 'Receipt No':b.receipt||'', 'Receipt Verified':b.receiptWrong?'Wrong':(b.donationVerified?'Yes':'No'), 'Seva Received By':b.sevaChannel?sevaChannelLabel(b).replace(/<[^>]+>/g,''):'', 'Seva Date':b.sevaDate||'', 'Accommodation':b.donation>=DB.rules.freeMin?(entitleSplit(b).foc+' FOC · '+entitleSplit(b).paid+' paid'):(b.sevaCollected?'Seva collected':'Seva pending'), 'Status':b.status, 'Hotel':b.hotel?hotelName(b.hotel):'', 'Location (allocated)':loc,
   'Room Type':b.roomType||'', 'Rooms':b.rooms||0,
   'Extra Bed Requested':b.extraRequested||0, 'Extra Bed Given':b.extraBeds||0,
   'Separate Rooms Requested':b.roomsRequested||0,
@@ -2299,7 +2300,7 @@ function accommodationRow(b){ return {
   'Guest / Family':b.head||'', 'Type':b.guestType||'FR', 'People':b.count, 'Mobile':b.phone||'', 'Devotee':devoteeName(b),
   'Guest House(s)':hotelsTextForBooking(b), 'Rooms':allocSummary(b),
   'Check-in':b.checkin||'', 'Check-out':b.checkout||'', 'Nights':nights(b),
-  'Seva':(b.guestType&&b.guestType!=='FR')?'—':(b.donation>=DB.rules.freeMin?'Free stay':(b.sevaCollected?('Received by '+sevaChannelLabel(b).replace(/<[^>]+>/g,'')):'Pending')),
+  'Seva':(b.guestType&&b.guestType!=='FR')?'—':(b.donation>=DB.rules.freeMin?(entitleSplit(b).foc+' FOC · '+entitleSplit(b).paid+' paid'):(b.sevaCollected?('Received by '+sevaChannelLabel(b).replace(/<[^>]+>/g,'')):'Pending')),
   'Note':b.note||'', 'Internal Notes':commentsText(b) }; }
 function exportAccommodation(){ if(typeof XLSX==='undefined'){ toast('Report library still loading — try again'); return; }
   const wb=XLSX.utils.book_new();
