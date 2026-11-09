@@ -398,7 +398,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b180';
+const APP_BUILD='2026-08-16-b181';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -937,14 +937,8 @@ function viewNewReq(){
       <div class="rooms-mini">Please tick whether this donation was for Janmashtami or Radha Ashtami. Ticking one is required.</div></div>
     <p class="rooms-mini" id="typeNote" style="margin:4px 0 0">FR Guest — donation receipt number is required.</p>
     <div id="sevaPlanWrap" style="margin-top:10px;background:#f6efe2;border:1px dashed var(--line);border-radius:10px;padding:10px 14px">
-      <label style="margin-top:0">💰 Who will collect the room seva / payment?</label>
-      <select id="reqSevaPlan" onchange="sevaTouched()">
-        <option value="devotee">I (Devotee) will collect / arrange the seva</option>
-        <option value="staff">Staff will collect the seva</option>
-        <option value="foc">FOC — Free of cost (donation ₹50,000 &amp; above)</option>
-        <option value="kind">Kind Donor</option>
-      </select>
-      <p class="rooms-mini" id="sevaPlanNote" style="margin:4px 0 0">Donation ₹50,000 or above → <b>FOC (free of cost)</b> is auto-selected; you may change it. Below ₹50,000 → FOC is not available; choose Devotee or Staff. This shows up for Staff, VCM Guest House and Super Admin.</p></div>
+      <p style="margin:0;font-weight:600;color:var(--saffron-dark)">💰 Paid Room Seva — Guest has to pay at the reception.</p>
+      <input type="hidden" id="reqSevaPlan" value="devotee"></div>
     <div id="extraRoomWrap" style="margin-top:10px;background:#fdecec;border:1px solid #f3c2c2;border-radius:10px;padding:10px 14px;display:none">
       <label style="margin-top:0;color:var(--red)">🚪 Only 1 room is free — who will collect the amount for the extra (paid) room(s)? <span style="color:var(--red)">*</span></label>
       <select id="reqExtraRoomPayer">
