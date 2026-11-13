@@ -337,7 +337,7 @@ async function loadFromCloud(){
     sb.from('donations').select('booking_id,receipt,donation_verified,receipt_wrong'),
     wantNotifs ? sb.from('notifications').select('id,data,ack,ts').order('ts',{ascending:false}).limit(300) : none,
     wantAmounts ? sb.from('amounts').select('booking_id,amount') : none,
-    isAdmin ? sb.from('profiles').select('login_id,role,assigned_name') : none,
+    isAdmin ? sb.from('profiles').select('login_id,role,assigned_name,revoked') : none,
     isAdmin ? sb.from('credentials').select('login_id,pw') : none
   ]);
   // If the server returned an error, KEEP the current data (never wipe the screen on a transient failure)
@@ -398,7 +398,7 @@ function startPoll(){ stopPoll(); _pollTimer=setInterval(async()=>{ if(!USER) re
 }, 15000); }
 function stopPoll(){ if(_pollTimer) clearInterval(_pollTimer); _pollTimer=null; }
 /* ---- Auto-update: reload when a newer build is deployed, so users never see a stale cached page ---- */
-const APP_BUILD='2026-08-16-b191';
+const APP_BUILD='2026-08-16-b192';
 async function checkForUpdate(){
   try{
     const ae=document.activeElement; if(ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;   // never interrupt typing
@@ -748,8 +748,9 @@ async function doLogin(){
     const email=id.toLowerCase()+'@hkm.local';
     const { data, error } = await sb.auth.signInWithPassword({ email, password:pass });
     if(error||!data.user){ toast('Invalid Login ID or password'); return; }
-    const { data:prof } = await sb.from('profiles').select('login_id,role,assigned_name').eq('id',data.user.id).maybeSingle();
+    const { data:prof } = await sb.from('profiles').select('login_id,role,assigned_name,revoked').eq('id',data.user.id).maybeSingle();
     if(!prof){ toast('No profile found for this login'); return; }
+    if(prof.revoked){ try{ await sb.auth.signOut(); }catch(e){} toast('This login has been revoked. Please contact the office.'); return; }
     USER={ id:prof.login_id, role:prof.role, name:(prof.assigned_name&&prof.assigned_name.trim())||prof.login_id };
     saveLastLogin();
     await loadFromCloud();
@@ -2529,6 +2530,7 @@ function viewDonations(){
 /* ---------------- Super Admin: Logins (all IDs & passwords) ---------------- */
 function copyStr(s,msg){ if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(s).then(()=>toast((msg||'Copied')+': '+s),()=>fallbackCopy(s)); } else fallbackCopy(s); }
 function setAssign(id,val){ DB.assign=DB.assign||{}; DB.assign[id]=val.trim(); sb.from('profiles').update({assigned_name:val.trim()}).eq('login_id',id).then(()=>{},e=>console.warn('assign',e)); }
+function toggleRevoke(id,val){ if(!USER||USER.role!=='admin'){ toast('Only Super Admin can change access'); return; } if(val && !confirm('Revoke login for '+id+'? This person will no longer be able to log in.')) return; var u=(DB.loginList||[]).find(function(x){return x.login_id===id;}); if(u) u.revoked=val; sb.from('profiles').update({revoked:val}).eq('login_id',id).then(function(){ toast(val?('Login revoked: '+id):('Login restored: '+id)); render(); },function(e){ toast('Failed: '+(e.message||e)); if(u)u.revoked=!val; render(); }); }
 function filterLoginRows(q){ q=(q||'').toLowerCase().trim();
   document.querySelectorAll('#loginRows tr').forEach(tr=>{ const s=tr.dataset.s||''; tr.style.display=s.includes(q)?'':'none'; }); }
 function loginRoleLabel(r){ return r==='admin'?'Super Admin':r==='vcm'?'Admin (VCM)':r==='staff'?'Staff':r==='accounts'?'Accounts Team':'Devotee'; }
@@ -2541,21 +2543,22 @@ function copyLogin(id){
 function viewLogins(){
   DB.assign=DB.assign||{}; DB.creds=DB.creds||{};
   const order={admin:0,vcm:1,staff:2,brahmachari:3};
-  const list=[...(DB.loginList||[])].sort((a,b)=> (order[a.role]-order[b.role]) || a.login_id.localeCompare(b.login_id));
+  const nm=(u)=>((DB.assign[u.login_id]||'').trim()?0:1); const list=[...(DB.loginList||[])].sort((a,b)=> (nm(a)-nm(b)) || (order[a.role]-order[b.role]) || a.login_id.localeCompare(b.login_id));
   const rows=list.map(u=>{ const to=DB.assign[u.login_id]||''; const pw=DB.creds[u.login_id]||''; const rl=loginRoleLabel(u.role);
-    return `<tr data-s="${esc((u.login_id+' '+rl+' '+to).toLowerCase())}">
+    return `<tr data-s="${esc((u.login_id+' '+rl+' '+to).toLowerCase())}" style="background:${to.trim()?'#e8f8ec':'#fdeaea'}${u.revoked?';opacity:.5':''}">
       <td data-label="Login ID"><span class="rcp-copy" onclick="copyLogin('${u.login_id}')" title="Click to copy this login">${u.login_id}</span></td>
       <td data-label="Password"><span class="rcp-copy" onclick="copyLogin('${u.login_id}')" title="Click to copy this login">${esc(pw||'••••')}</span></td>
-      <td data-label="Role">${rl}</td>
+      <td data-label="Role">${rl}${u.revoked?' <span style="color:#c0392b;font-weight:700">· REVOKED</span>':''}</td>
       <td data-label="Assigned to"><input type="text" value="${esc(to)}" placeholder="type person's name" style="min-width:150px" onchange="setAssign('${u.login_id}',this.value)"></td>
       <td data-label="Share"><button class="btn sm" onclick="copyLogin('${u.login_id}')">📋 Copy</button></td>
+      <td data-label="Access"><button class="btn sm" style="background:${u.revoked?'#2e7d32':'#c0392b'};color:#fff" onclick="toggleRevoke('${u.login_id}',${u.revoked?'false':'true'})">${u.revoked?'Restore':'Revoke'}</button></td>
     </tr>`; }).join('');
   const counts=['admin','vcm','staff','brahmachari'].map(r=>loginRoleLabel(r)+': '+list.filter(u=>u.role===r).length).join(' · ');
   return `<div class="card"><h2 class="section">🔑 Logins</h2>
     <p class="subhead">All ${list.length} login accounts. Passwords are visible only to you (Super Admin) — no other role can see them. Tap <b>Copy</b> (or a row's ID/password) to copy the <b>Login ID + Password + Name</b> together, ready to paste into WhatsApp. ${counts}.</p>
     <input placeholder="🔍 Search ID, role, or assigned name" value="${esc(searchQ['loginRows']||'')}" oninput="setSearch('loginRows',this.value)" style="max-width:360px;margin-bottom:10px">
     <div style="overflow:auto">
-    <table class="stack-mobile"><thead><tr><th>Login ID</th><th>Password</th><th>Role</th><th>Assigned to (person's name)</th><th>Share</th></tr></thead>
+    <table class="stack-mobile"><thead><tr><th>Login ID</th><th>Password</th><th>Role</th><th>Assigned to (person's name)</th><th>Share</th><th>Access</th></tr></thead>
       <tbody id="loginRows">${rows}</tbody></table></div></div>`;
 }
 
